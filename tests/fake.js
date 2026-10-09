@@ -59,3 +59,5 @@ export const SICK_FLOW = [text('/start'), tap('rank:PTE'), text('Tan Ah Kow'), t
   text('Fever and sore throat'), text('Kranji Medical Centre'), text('0830'), tap('ack:yes')];
 export const MC_FLOW = [text('/start'), tap('rank:CPL'), text('Lim Bee Hoon'), tap('type:mc'),
   text('Sprained ankle, light duty'), text('10/10/2026'), text('12/10/2026')];
+export const APPT_FLOW = [text('/start'), tap('rank:PTE'), text('Tan Ah Kow'), tap('type:appt'),
+  text('Eczema'), text('20/10/2026 1400'), text('SGH Dermatology'), photo(), tap('pledge:yes')];
