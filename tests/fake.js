@@ -56,6 +56,6 @@ export const adminTap = (admin, data) => ({
 export const groupText = (t) => ({ update_id: ++id, message: { message_id: ++id, chat: { id: -1, type: 'group' }, from: USER, text: t } });
 
 export const SICK_FLOW = [text('/start'), tap('rank:PTE'), text('Tan Ah Kow'), tap('type:sick'),
-  text('Fever and sore throat'), text('Kranji Medical Centre'), text('10/10/2026 0830'), tap('ack:yes')];
+  text('Fever and sore throat'), text('Kranji Medical Centre'), text('0830'), tap('ack:yes')];
 export const MC_FLOW = [text('/start'), tap('rank:CPL'), text('Lim Bee Hoon'), tap('type:mc'),
   text('Sprained ankle, light duty'), text('10/10/2026'), text('12/10/2026')];

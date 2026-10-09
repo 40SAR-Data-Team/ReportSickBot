@@ -1,23 +1,25 @@
 const RANKS =['REC', 'PTE', 'LCP', 'CPL', 'CFC', '3SG', '2SG', '2LT', 'LTA'];
 const TYPES = { sick: 'Request Permission to Report Sick', mc: 'Send MC / Status from the Doctor / MO' };
-const ACK = "I will wait for my commander's permission before reporting sick";
+const ACK = "I will wait for my commander's approval before I report sick";
 
 const btn = (text, data) => ({ text, callback_data: data });
+/** Today's date in Singapore as DD/MM/YYYY. */
+const today = () => new Date().toLocaleDateString('en-GB', { timeZone: 'Asia/Singapore' });
 
 // step -> [question, inline keyboard?]
 const QUESTIONS = {
-  rank: ['Select your rank (most of you are PTEs):',
+  rank: ['What is your Rank?',
     [0, 3, 6].map((i) => RANKS.slice(i, i + 3).map((r) => btn(r, `rank:${r}`)))],
-  name: ['Enter your name:'],
-  type: ['What would you like to do?', [[btn(TYPES.sick, 'type:sick')], [btn(TYPES.mc, 'type:mc')]]],
-  condition: ['Medical condition:'],
-  clinic: ['Clinic:'],
-  time: ['Time (DD/MM/YYYY HHMM, e.g. 10/10/2026 0830):'],
+  name: ['What is your Name?'],
+  type: ['How may I help you?', [[btn(TYPES.sick, 'type:sick')], [btn(TYPES.mc, 'type:mc')]]],
+  condition: ['What symptoms are you experiencing?'],
+  clinic: ['Which clinic will you visit?'],
+  time: ['What time will you visit the doctor? (24h format, e.g. 0830)'],
   ack: [`${ACK}.`, [[btn('✅ I acknowledge', 'ack:yes')]]],
-  reason: ['Reason for MC / Description of new Status:'],
-  start: ['Start Date of MC/Status (DD/MM/YYYY):'],
-  end: ['End Date of MC/Status (DD/MM/YYYY):'],
-  file: ['Attach your MC / Status / Memo here (one photo or PDF):'],
+  reason: ['What new status are you given / What is your reason for MC?'],
+  start: ['Start Date of MC / Status? (DD/MM/YYYY)'],
+  end: ['End Date of MC / Status? (DD/MM/YYYY)'],
+  file: ['Attach your MC / Memo. (one photo or PDF)'],
 };
 const NEXT = { rank: 'name', name: 'type', condition: 'clinic', clinic: 'time', time: 'ack', reason: 'start', start: 'end', end: 'file' };
 const BUTTON_STEPS = new Set(['rank', 'type', 'ack']);
@@ -154,12 +156,12 @@ async function handle(update) {
     if (!text) return reply(s.step, 'Please type your answer.');
     // keeps the admin summary under Telegram's 4096-char message limit
     if (text.length > 500) return reply(s.step, 'Too long, please keep it under 500 characters.');
-    if (s.step === 'time' && !parseDateTime(text, true)) return reply('time', 'Invalid date/time.');
+    if (s.step === 'time' && !parseDateTime(`${today()} ${text}`, true)) return reply('time', 'Invalid time.');
     if ((s.step === 'start' || s.step === 'end') && !parseDateTime(text, false)) return reply(s.step, 'Invalid date.');
     if (s.step === 'end' && parseDateTime(text, false) < parseDateTime(s.start, false)) {
       return reply('end', 'End date cannot be before the start date.');
     }
-    value = text;
+    value = s.step === 'time' ? `${today()} ${text}` : text;
   }
 
   s[s.step] = value;
