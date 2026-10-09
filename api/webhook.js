@@ -85,7 +85,7 @@ function ask(chat, step, prefix) {
 // ADMINS env var: JSON {"name": telegramId}. Unset means no admins, so the submit fails loudly.
 const admins = () => Object.entries(JSON.parse(process.env.ADMINS ?? '{}'));
 
-/** Sends the summary (and attached file) to every admin; returns the summary, or '' if no admin received it. */
+/** Sends the summary (and attached file) to every admin; returns the submission, or null if no admin received it. */
 async function submit(chat, s, from) {
   const who = `${s.rank} ${s.name}`;
   const lines = {
@@ -110,13 +110,11 @@ async function submit(chat, s, from) {
   // An admin who never pressed Start on the bot can't be messaged; log it so they can be told.
   results.forEach((r, i) => r.status === 'rejected' && console.error(`admin ${list[i].join(' ')}:`, r.reason));
   const msgs = results.filter((r) => r.status === 'fulfilled').map((r) => r.value);
-  // ponytail: buttons go dead after 7 days, raise EX if admins act later
   const label = `${who}, ${{ sick: 'sick request', appt: `medical appointment ${s.when}`, mc: `MC ${s.start} to ${s.end}` }[s.type]}`;
-  if (msgs.length) await redis('SET', `sub:${id}`, JSON.stringify({ user: chat, type: s.type, text, label, msgs }), 'EX', 604800);
-  return msgs.length ? text : '';
+  return msgs.length ? { id, user: chat, type: s.type, text, label, msgs } : null;
 }
 
-/** Admin tapped Approve / Added to BatSys: shrink every admin's summary to one line, tell the soldier if approved. */
+/** Admin tapped Approve / Added to BatSys: shrink every admin's summary to one line, swap the soldier's summary for the outcome. */
 async function act(cb) {
   const name = admins().find(([, id]) => id === cb.from.id)?.[0];
   if (!name) return;
@@ -125,9 +123,12 @@ async function act(cb) {
   if (!sub) return;
   // ponytail: `?? rank+name line` only for subs stored before labels existed; drop after 7 days
   const done = `${FOR_ADMIN} ✅ ${sub.label ?? sub.text.split('\n')[1]} ${sub.type === 'mc' ? 'added to BatSys' : 'approved'} by ${name}`;
+  const outcome = sub.type === 'mc' ? `✅ Added to BatSys by ${name}` : `✅ ${name} has approved`;
   const results = await Promise.allSettled([
     ...sub.msgs.map(([chat_id, message_id]) => tg('editMessageText', { chat_id, message_id, text: done })),
-    ...(sub.type !== 'mc' ? [tg('sendMessage', { chat_id: sub.user, text: `${sub.text}\n\n✅ ${name} has approved` })] : []),
+    tg('sendMessage', { chat_id: sub.user, text: `${sub.text}\n\n${outcome}` }),
+    // the outcome message replaces the soldier's summary (fails after 48h, then both stay)
+    ...(sub.summary ? [tg('deleteMessage', { chat_id: sub.user, message_id: sub.summary })] : []),
   ]);
   results.forEach((r) => r.status === 'rejected' && console.error('act:', r.reason));
 }
@@ -195,8 +196,8 @@ async function handle(update) {
   }
 
   // Last step done. State is not advanced, so on failure the user can just retry the last step.
-  const summary = await submit(chat, s, update.message?.from ?? cb.from);
-  if (!summary) {
+  const sub = await submit(chat, s, update.message?.from ?? cb.from);
+  if (!sub) {
     s.ids.push((await tg('sendMessage', { chat_id: chat, text: 'Failed to send to your commanders. Please try again.' })).message_id);
     return save();
   }
@@ -209,7 +210,10 @@ async function handle(update) {
   } catch (e) {
     console.error('cleanup:', e);
   }
-  return tg('sendMessage', { chat_id: chat, text: `${summary}\n\nSubmitted ✅ Send /start to submit another.` });
+  const sent = await tg('sendMessage', { chat_id: chat, text: `${sub.text}\n\nSubmitted ✅ Send /start to submit another.` });
+  sub.summary = sent.message_id;
+  // ponytail: buttons go dead after 7 days, raise EX if admins act later
+  await redis('SET', `sub:${sub.id}`, JSON.stringify(sub), 'EX', 604800);
 }
 
 export default async function handler(req, res) {
