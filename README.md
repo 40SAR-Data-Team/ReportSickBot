@@ -37,7 +37,7 @@ If `ADMINS` already exists, run `vercel env rm ADMINS production` first.
 
 DM the bot `/start`. Send `/cancel` to abort. Unfinished forms expire after 1 hour.
 
-Each admin's copy of a submission has a button. For a sick request it is **Approve**: tapping it marks every admin's copy "✅ <admin> has approved" and sends the soldier the same message. For an MC it is **Added to BatSys?**: tapping it marks every admin's copy "✅ Added to BatSys by <admin>". The first tap wins. Buttons stop working after 30 days.
+Each admin's copy of a submission has a button. For a sick request it is **Approve**: tapping it marks every admin's copy "✅ <admin> has approved" and sends the soldier the same message. For an MC it is **Added to BatSys?**: tapping it marks every admin's copy "✅ Added to BatSys by <admin>". The first tap wins. Buttons stop working after 7 days.
 
 ## Test
 
