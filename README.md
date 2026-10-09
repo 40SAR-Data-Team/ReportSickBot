@@ -1,6 +1,6 @@
 # Report Sick Bot
 
-A Telegram bot. Users DM it to request permission to report sick, or to send an MC/status. The bot posts each submission to a group chat.
+A Telegram bot. Users DM it to request permission to report sick, or to send an MC/status. The bot sends each submission to the administrators listed in `config.json`.
 
 ## Setup
 
@@ -9,12 +9,19 @@ A Telegram bot. Users DM it to request permission to report sick, or to send an 
 3. Add these env vars in Vercel, then redeploy with `vercel --prod`:
    - `BOT_TOKEN`: the token from @BotFather.
    - `WEBHOOK_SECRET`: any random string (letters, digits, `_` and `-` only).
-   - `GROUP_CHAT_ID`: the ID of the group. To get it, add the bot to the group and send a message there. Then open `https://api.telegram.org/bot<BOT_TOKEN>/getUpdates` and read `chat.id`. It is negative, e.g. `-100123...`. Read it before step 4, because `getUpdates` stops working once a webhook is set.
 4. Point Telegram at the function:
 
    ```sh
    curl "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=https://<app>.vercel.app/api/webhook&secret_token=<WEBHOOK_SECRET>"
    ```
+
+## Administrators
+
+Put the admins' numeric Telegram user IDs in `config.json`, e.g. `{ "admins": [123456789, 987654321] }`. Then commit and redeploy.
+
+- To find a user ID, message @userinfobot.
+- Each admin must press **Start** on the bot once. Telegram does not let a bot message a user who has never started it.
+- If an admin can't be reached, the others still get the submission, and the Vercel logs show `admin <id>: ...`.
 
 ## Use
 

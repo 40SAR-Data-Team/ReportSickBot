@@ -1,7 +1,7 @@
 // Calls the handler directly with fetch mocked to the dummy backend.
 import { afterAll, beforeEach, expect, test } from 'bun:test';
 import handler from '../api/webhook.js';
-import { ENV, GROUP, MC_FLOW, SICK_FLOW, doc, fakeBackend, groupText, photo, tap, text } from './fake.js';
+import { ADMINS, ENV, MC_FLOW, SICK_FLOW, doc, fakeBackend, groupText, photo, tap, text } from './fake.js';
 
 const realFetch = globalThis.fetch;
 let b;
@@ -21,9 +21,10 @@ async function send(update, secret = ENV.WEBHOOK_SECRET) {
 }
 const sendAll = async (updates) => { for (const u of updates) await send(u); };
 
-test('sick flow posts the request to the group', async () => {
+test('sick flow sends the request to every admin', async () => {
   await sendAll(SICK_FLOW);
-  const [post] = b.toGroup();
+  const [post] = b.toAdmin(ADMINS[0]);
+  expect(b.toAdmin(ADMINS[1])[0].text).toBe(post.text);
   expect(post.method).toBe('sendMessage');
   expect(post.text).toContain('REQUEST TO REPORT SICK');
   expect(post.text).toContain('PTE Tan Ah Kow');
@@ -45,17 +46,19 @@ test('rank question offers all ranks and mentions PTEs', async () => {
 });
 
 test.each([['PDF', () => doc('application/pdf')], ['photo', photo], ['image document', () => doc('image/jpeg')]])(
-  'mc flow forwards a %s to the group',
+  'mc flow forwards a %s to every admin',
   async (_, file) => {
     const f = file();
     await sendAll([...MC_FLOW, f]);
-    const [post, copy] = b.toGroup();
-    expect(post.text).toContain('MC / STATUS');
-    expect(post.text).toContain('CPL Lim Bee Hoon');
-    expect(post.text).toContain('Reason / Status: Sprained ankle, light duty');
-    expect(post.text).toContain('From 10/10/2026 to 12/10/2026');
-    expect(copy).toMatchObject({ method: 'copyMessage', from_chat_id: 111, message_id: f.message.message_id });
-    expect(copy.reply_parameters.message_id).toBe(post.result.message_id);
+    for (const admin of ADMINS) {
+      const [post, copy] = b.toAdmin(admin);
+      expect(post.text).toContain('MC / STATUS');
+      expect(post.text).toContain('CPL Lim Bee Hoon');
+      expect(post.text).toContain('Reason / Status: Sprained ankle, light duty');
+      expect(post.text).toContain('From 10/10/2026 to 12/10/2026');
+      expect(copy).toMatchObject({ method: 'copyMessage', from_chat_id: 111, message_id: f.message.message_id });
+      expect(copy.reply_parameters.message_id).toBe(post.result.message_id);
+    }
   },
 );
 
@@ -119,15 +122,22 @@ test('file step rejects non-PDF documents and text', async () => {
   await send(doc('application/zip'));
   await send(text('here'));
   expect(b.toUser().slice(-2).every((t) => t.includes('photo or a PDF'))).toBe(true);
-  expect(b.toGroup()).toHaveLength(0);
+  expect(ADMINS.flatMap(b.toAdmin)).toHaveLength(0);
 });
 
-test('group send failure tells the user and allows retry', async () => {
-  b.fail = 'sendMessage';
+test('one unreachable admin does not block the others', async () => {
+  b.failFor.add(ADMINS[0]);
+  await sendAll(SICK_FLOW);
+  expect(b.toAdmin(ADMINS[1])[0].text).toContain('REQUEST TO REPORT SICK');
+  expect(b.toUser().at(-1)).toContain('Submitted');
+});
+
+test('all admins unreachable tells the user and allows retry', async () => {
+  ADMINS.forEach((a) => b.failFor.add(a));
   await sendAll(SICK_FLOW);
   expect(b.toUser().at(-1)).toContain('Failed to send');
   expect(JSON.parse(b.store.get('form:111')).step).toBe('ack');
-  b.fail = null;
+  b.failFor.clear();
   await send(tap('ack:yes'));
   expect(b.toUser().at(-1)).toContain('Submitted');
 });
