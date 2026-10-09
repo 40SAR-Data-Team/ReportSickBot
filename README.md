@@ -37,7 +37,11 @@ If `ADMINS` already exists, run `vercel env rm ADMINS production` first.
 
 DM the bot `/start`. Send `/cancel` to abort. Unfinished forms expire after 1 hour.
 
-Each admin's copy of a submission has a button. For a sick request it is **Approve**: tapping it marks every admin's copy "✅ <admin> has approved" and sends the soldier the same message. For an MC it is **Added to BatSys?**: tapping it marks every admin's copy "✅ Added to BatSys by <admin>". The first tap wins. Buttons stop working after 7 days.
+On submit, the bot deletes the form's questions and answers and leaves the soldier one summary message.
+
+Each admin's copy of a submission has a button. For a sick request it is **Approve**: tapping it shrinks every admin's copy to one line ("✅ PTE Tan, sick request approved by <admin>") and sends the soldier the summary with "✅ <admin> has approved". For an MC it is **Added to BatSys?**: tapping it shrinks every admin's copy to one line and deletes their copy of the file. The first tap wins. Buttons stop working after 7 days.
+
+Telegram doesn't let bots delete messages older than 48 hours, so those stay.
 
 ## Test
 

@@ -80,30 +80,33 @@ async function submit(chat, s, from) {
   const list = admins();
   const results = await Promise.allSettled(list.map(async ([, admin]) => {
     const sent = await tg('sendMessage', { chat_id: admin, text, reply_markup: { inline_keyboard: [[button]] } });
-    if (s.type === 'mc') {
-      await tg('copyMessage', { chat_id: admin, from_chat_id: chat, message_id: s.file, reply_parameters: { message_id: sent.message_id } });
-    }
-    return [admin, sent.message_id];
+    if (s.type === 'sick') return [admin, sent.message_id];
+    const file = await tg('copyMessage', { chat_id: admin, from_chat_id: chat, message_id: s.file, reply_parameters: { message_id: sent.message_id } });
+    return [admin, sent.message_id, file.message_id];
   }));
   // An admin who never pressed Start on the bot can't be messaged; log it so they can be told.
   results.forEach((r, i) => r.status === 'rejected' && console.error(`admin ${list[i].join(' ')}:`, r.reason));
   const msgs = results.filter((r) => r.status === 'fulfilled').map((r) => r.value);
   // ponytail: buttons go dead after 7 days, raise EX if admins act later
-  if (msgs.length) await redis('SET', `sub:${id}`, JSON.stringify({ user: chat, type: s.type, text, msgs }), 'EX', 604800);
+  const label = `${s.rank} ${s.name}, ${s.type === 'sick' ? 'sick request' : `MC ${s.start} to ${s.end}`}`;
+  if (msgs.length) await redis('SET', `sub:${id}`, JSON.stringify({ user: chat, type: s.type, text, label, msgs }), 'EX', 604800);
   return msgs.length ? text : '';
 }
 
-/** Admin tapped Approve / Added to BatSys: mark every admin's copy done, tell the soldier if approved. */
+/** Admin tapped Approve / Added to BatSys: shrink every admin's copy to one line, tell the soldier if approved. */
 async function act(cb) {
   const name = admins().find(([, id]) => id === cb.from.id)?.[0];
   if (!name) return;
   // GETDEL is atomic: a second tap, or two admins tapping at once, gets null.
   const sub = JSON.parse((await redis('GETDEL', `sub:${cb.data.split(':')[1]}`)) ?? 'null');
   if (!sub) return;
-  const text = `${sub.text}\n\n${sub.type === 'sick' ? `✅ ${name} has approved` : `✅ Added to BatSys by ${name}`}`;
+  // ponytail: `?? rank+name line` only for subs stored before labels existed; drop after 7 days
+  const done = `✅ ${sub.label ?? sub.text.split('\n')[1]} ${sub.type === 'sick' ? 'approved' : 'added to BatSys'} by ${name}`;
   const results = await Promise.allSettled([
-    ...sub.msgs.map(([chat_id, message_id]) => tg('editMessageText', { chat_id, message_id, text })),
-    ...(sub.type === 'sick' ? [tg('sendMessage', { chat_id: sub.user, text })] : []),
+    ...sub.msgs.map(([chat_id, message_id]) => tg('editMessageText', { chat_id, message_id, text: done })),
+    // MC file copy is no longer needed once it's in BatSys (fails after 48h, then just stays)
+    ...sub.msgs.filter((m) => m[2]).map(([chat_id, , message_id]) => tg('deleteMessage', { chat_id, message_id })),
+    ...(sub.type === 'sick' ? [tg('sendMessage', { chat_id: sub.user, text: `${sub.text}\n\n✅ ${name} has approved` })] : []),
   ]);
   results.forEach((r) => r.status === 'rejected' && console.error('act:', r.reason));
 }

@@ -64,11 +64,11 @@ test('approve marks every admin copy and tells the soldier', async () => {
   expect(done.map((c) => [c.chat_id, c.message_id]))
     .toEqual(ADMINS.map((a) => [a, b.toAdmin(a)[0].result.message_id]));
   for (const e of done) {
-    expect(e.text).toContain('REQUEST TO REPORT SICK');
-    expect(e.text).toEndWith('✅ Admin B has approved');
+    expect(e.text).toBe('✅ PTE Tan Ah Kow, sick request approved by Admin B');
     expect(e.reply_markup).toBeUndefined();
   }
-  expect(b.toUser().at(-1)).toBe(done[0].text);
+  expect(b.toUser().at(-1)).toContain('REQUEST TO REPORT SICK');
+  expect(b.toUser().at(-1)).toEndWith('✅ Admin B has approved');
   const after = b.calls.length;
   expect(after).toBeGreaterThan(before);
   await send(adminTap(ADMINS[0], callback_data)); // second tap
@@ -88,7 +88,9 @@ test('added to BatSys marks every admin copy, soldier not messaged', async () =>
   const userMsgs = b.toUser().length;
   await send(adminTap(ADMINS[0], callback_data));
   expect(edits()).toHaveLength(2);
-  expect(edits().every((e) => e.text.endsWith('✅ Added to BatSys by Admin A'))).toBe(true);
+  expect(edits().every((e) => e.text === '✅ CPL Lim Bee Hoon, MC 10/10/2026 to 12/10/2026 added to BatSys by Admin A')).toBe(true);
+  const files = ADMINS.map((a) => [a, b.toAdmin(a).find((c) => c.method === 'copyMessage').result.message_id]);
+  expect(b.calls.filter((c) => c.method === 'deleteMessage').map((c) => [c.chat_id, c.message_id])).toEqual(files);
   expect(b.toUser()).toHaveLength(userMsgs);
 });
 
