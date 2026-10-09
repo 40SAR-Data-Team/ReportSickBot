@@ -70,6 +70,8 @@ test('approve marks every admin copy and tells the soldier', async () => {
   }
   expect(b.toUser().at(-1)).toContain('REQUEST TO REPORT SICK');
   expect(b.toUser().at(-1)).toEndWith('✅ Admin B has approved');
+  const summary = b.calls.findLast((c) => c.chat_id === USER.id && c.text?.includes('Submitted')).result.message_id;
+  expect(b.calls.filter((c) => c.method === 'deleteMessage').map((c) => [c.chat_id, c.message_id])).toEqual([[USER.id, summary]]);
   const after = b.calls.length;
   expect(after).toBeGreaterThan(before);
   await send(adminTap(ADMINS[0], callback_data)); // second tap
@@ -82,7 +84,7 @@ test('non-admin cannot approve', async () => {
   expect(edits()).toHaveLength(0);
 });
 
-test('added to BatSys marks every admin copy, keeps file copies, soldier not messaged', async () => {
+test('added to BatSys marks every admin copy, keeps file copies, tells the soldier', async () => {
   await sendAll([...MC_FLOW, photo()]);
   const { text: label, callback_data } = button(ADMINS[0]);
   expect(label).toBe('Added to BatSys?');
@@ -91,7 +93,8 @@ test('added to BatSys marks every admin copy, keeps file copies, soldier not mes
   expect(edits()).toHaveLength(2);
   expect(edits().every((e) => e.text === '[For Admin] ✅ CPL Lim Bee Hoon, MC 10/10/2026 to 12/10/2026 added to BatSys by Admin A')).toBe(true);
   expect(b.calls.filter((c) => c.method === 'deleteMessage' && ADMINS.includes(c.chat_id))).toHaveLength(0); // file copies kept
-  expect(b.toUser()).toHaveLength(userMsgs);
+  expect(b.toUser()).toHaveLength(userMsgs + 1);
+  expect(b.toUser().at(-1)).toEndWith('✅ Added to BatSys by Admin A');
 });
 
 test('appointment flow sends summary + screenshot; approve shrinks copies and tells the soldier', async () => {
