@@ -19,7 +19,7 @@ export function fakeBackend() {
       const call = { method, ...body };
       b.calls.push(call);
       if (b.failFor.has(body.chat_id)) return { ok: false, description: 'dummy failure' };
-      call.result = method === 'sendMessage' ? { message_id: ++b.nextId } : true;
+      call.result = method === 'sendMessage' || method === 'copyMessage' ? { message_id: ++b.nextId } : true;
       return { ok: true, result: call.result };
     }
     const [cmd, key, val] = body;
