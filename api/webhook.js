@@ -64,6 +64,9 @@ function ask(chat, step, prefix) {
   });
 }
 
+// ADMINS env var: JSON {"name": telegramId}. Unset means no admins, so the submit fails loudly.
+const admins = () => Object.entries(JSON.parse(process.env.ADMINS ?? '{}'));
+
 /** Sends the summary (and MC file) to every admin; returns how many admins received it. */
 async function submit(chat, s, from) {
   const lines = s.type === 'sick'
@@ -71,17 +74,38 @@ async function submit(chat, s, from) {
       `Clinic: ${s.clinic}`, `Time: ${s.time}`, `✅ ${ACK}`]
     : ['📄 MC / STATUS', `${s.rank} ${s.name}`, `Reason / Status: ${s.reason}`, `From ${s.start} to ${s.end}`];
   lines.push(`Sent by: ${from.username ? `@${from.username}` : `user id ${from.id}`}`);
-  // ADMINS env var: JSON {"name": telegramId}. Unset means no admins, so the submit fails loudly.
-  const admins = Object.entries(JSON.parse(process.env.ADMINS ?? '{}'));
-  const results = await Promise.allSettled(admins.map(async ([, admin]) => {
-    const sent = await tg('sendMessage', { chat_id: admin, text: lines.join('\n') });
+  const text = lines.join('\n');
+  const id = crypto.randomUUID();
+  const button = s.type === 'sick' ? btn('✅ Approve', `approve:${id}`) : btn('Added to BatSys?', `batsys:${id}`);
+  const list = admins();
+  const results = await Promise.allSettled(list.map(async ([, admin]) => {
+    const sent = await tg('sendMessage', { chat_id: admin, text, reply_markup: { inline_keyboard: [[button]] } });
     if (s.type === 'mc') {
       await tg('copyMessage', { chat_id: admin, from_chat_id: chat, message_id: s.file, reply_parameters: { message_id: sent.message_id } });
     }
+    return [admin, sent.message_id];
   }));
   // An admin who never pressed Start on the bot can't be messaged; log it so they can be told.
-  results.forEach((r, i) => r.status === 'rejected' && console.error(`admin ${admins[i].join(' ')}:`, r.reason));
-  return results.filter((r) => r.status === 'fulfilled').length;
+  results.forEach((r, i) => r.status === 'rejected' && console.error(`admin ${list[i].join(' ')}:`, r.reason));
+  const msgs = results.filter((r) => r.status === 'fulfilled').map((r) => r.value);
+  // ponytail: buttons go dead after 30 days, raise EX if admins act later
+  if (msgs.length) await redis('SET', `sub:${id}`, JSON.stringify({ user: chat, type: s.type, text, msgs }), 'EX', 2592000);
+  return msgs.length;
+}
+
+/** Admin tapped Approve / Added to BatSys: mark every admin's copy done, tell the soldier if approved. */
+async function act(cb) {
+  const name = admins().find(([, id]) => id === cb.from.id)?.[0];
+  if (!name) return;
+  // GETDEL is atomic: a second tap, or two admins tapping at once, gets null.
+  const sub = JSON.parse((await redis('GETDEL', `sub:${cb.data.split(':')[1]}`)) ?? 'null');
+  if (!sub) return;
+  const text = `${sub.text}\n\n${sub.type === 'sick' ? `✅ ${name} has approved` : `✅ Added to BatSys by ${name}`}`;
+  const results = await Promise.allSettled([
+    ...sub.msgs.map(([chat_id, message_id]) => tg('editMessageText', { chat_id, message_id, text })),
+    ...(sub.type === 'sick' ? [tg('sendMessage', { chat_id: sub.user, text })] : []),
+  ]);
+  results.forEach((r) => r.status === 'rejected' && console.error('act:', r.reason));
 }
 
 async function handle(update) {
@@ -92,6 +116,7 @@ async function handle(update) {
   const key = `form:${chat}`;
   const text = update.message?.text?.trim();
   if (cb) await tg('answerCallbackQuery', { callback_query_id: cb.id });
+  if (/^(approve|batsys):/.test(cb?.data)) return act(cb);
 
   if (text === '/start' || text === '/cancel') {
     await redis('DEL', key);
