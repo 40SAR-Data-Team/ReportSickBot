@@ -6,6 +6,7 @@ export const USER = { id: 111, username: 'pte_tan' };
 export const ENV = {
   BOT_TOKEN: 'dummy-token',
   WEBHOOK_SECRET: 'dummy-secret',
+  ADMINS: JSON.stringify({ 'Admin A': ADMINS[0], 'Admin B': ADMINS[1] }),
   KV_REST_API_TOKEN: 'dummy-kv-token',
 };
 

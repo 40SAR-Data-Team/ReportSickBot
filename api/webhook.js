@@ -1,5 +1,3 @@
-import config from '../config.json' with { type: 'json' };
-
 const RANKS =['REC', 'PTE', 'LCP', 'CPL', 'CFC', '3SG', '2SG', '2LT', 'LTA'];
 const TYPES = { sick: 'Request Permission to Report Sick', mc: 'Send MC / Status from the Doctor / MO' };
 const ACK = "I will wait for my commander's permission before reporting sick";
@@ -73,14 +71,16 @@ async function submit(chat, s, from) {
       `Clinic: ${s.clinic}`, `Time: ${s.time}`, `✅ ${ACK}`]
     : ['📄 MC / STATUS', `${s.rank} ${s.name}`, `Reason / Status: ${s.reason}`, `From ${s.start} to ${s.end}`];
   lines.push(`Sent by: ${from.username ? `@${from.username}` : `user id ${from.id}`}`);
-  const results = await Promise.allSettled(config.admins.map(async (admin) => {
+  // ADMINS env var: JSON {"name": telegramId}. Unset means no admins, so the submit fails loudly.
+  const admins = Object.entries(JSON.parse(process.env.ADMINS ?? '{}'));
+  const results = await Promise.allSettled(admins.map(async ([, admin]) => {
     const sent = await tg('sendMessage', { chat_id: admin, text: lines.join('\n') });
     if (s.type === 'mc') {
       await tg('copyMessage', { chat_id: admin, from_chat_id: chat, message_id: s.file, reply_parameters: { message_id: sent.message_id } });
     }
   }));
   // An admin who never pressed Start on the bot can't be messaged; log it so they can be told.
-  results.forEach((r, i) => r.status === 'rejected' && console.error(`admin ${config.admins[i]}:`, r.reason));
+  results.forEach((r, i) => r.status === 'rejected' && console.error(`admin ${admins[i].join(' ')}:`, r.reason));
   return results.filter((r) => r.status === 'fulfilled').length;
 }
 

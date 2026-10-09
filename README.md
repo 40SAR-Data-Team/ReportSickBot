@@ -1,6 +1,6 @@
 # Report Sick Bot
 
-A Telegram bot. Users DM it to request permission to report sick, or to send an MC/status. The bot sends each submission to the administrators listed in `config.json`.
+A Telegram bot. Users DM it to request permission to report sick, or to send an MC/status. The bot sends each submission to the administrators in the `ADMINS` env var.
 
 ## Setup
 
@@ -9,6 +9,7 @@ A Telegram bot. Users DM it to request permission to report sick, or to send an 
 3. Add these env vars in Vercel, then redeploy with `vercel --prod`:
    - `BOT_TOKEN`: the token from @BotFather.
    - `WEBHOOK_SECRET`: any random string (letters, digits, `_` and `-` only).
+   - `ADMINS`: see Administrators below.
 4. Point Telegram at the function:
 
    ```sh
@@ -17,11 +18,20 @@ A Telegram bot. Users DM it to request permission to report sick, or to send an 
 
 ## Administrators
 
-Put the admins' numeric Telegram user IDs in `config.json`, e.g. `{ "admins": [123456789, 987654321] }`. Then commit and redeploy.
+`ADMINS` is a JSON object that maps each name to a Telegram user ID, e.g. `{"Joen":123456789}`. The names are only labels. The list is kept out of git, because names and IDs are personal data.
+
+Keep your copy in an untracked `config.json` (`{ "admins": { ... } }`). Push it to Vercel, then redeploy:
+
+```sh
+bun -e "console.log(JSON.stringify(require('./config.json').admins))" | vercel env add ADMINS production
+vercel --prod
+```
+
+If `ADMINS` already exists, run `vercel env rm ADMINS production` first.
 
 - To find a user ID, message @userinfobot.
 - Each admin must press **Start** on the bot once. Telegram does not let a bot message a user who has never started it.
-- If an admin can't be reached, the others still get the submission, and the Vercel logs show `admin <id>: ...`.
+- If an admin can't be reached, the others still get the submission, and the Vercel logs show `admin <name> <id>: ...`.
 
 ## Use
 
