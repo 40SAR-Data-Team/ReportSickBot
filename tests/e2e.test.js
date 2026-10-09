@@ -3,7 +3,7 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createServer } from 'node:http';
 import handler from '../api/webhook.js';
-import { ADMINS, ENV, MC_FLOW, SICK_FLOW, doc, fakeBackend } from './fake.js';
+import { ADMINS, ENV, MC_FLOW, SICK_FLOW, adminTap, doc, fakeBackend } from './fake.js';
 
 let b, upstream, app, webhookUrl;
 
@@ -54,5 +54,12 @@ test('MC with PDF reaches the admins over HTTP', async () => {
   const [summary, file] = b.toAdmin(ADMINS[1]).slice(-2);
   expect(summary.text).toContain('MC / STATUS');
   expect(file.method).toBe('copyMessage');
-  expect(b.store.size).toBe(0);
+  expect(b.store.has('form:111')).toBe(false);
+});
+
+test('admin approval reaches the soldier over HTTP', async () => {
+  for (const u of SICK_FLOW) await post(u);
+  const sent = b.toAdmin(ADMINS[0]).findLast((c) => c.method === 'sendMessage');
+  expect((await post(adminTap(ADMINS[0], sent.reply_markup.inline_keyboard[0][0].callback_data))).status).toBe(200);
+  expect(b.toUser().at(-1)).toEndWith('✅ Admin A has approved');
 });

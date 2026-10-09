@@ -1,7 +1,7 @@
 // Calls the handler directly with fetch mocked to the dummy backend.
 import { afterAll, beforeEach, expect, test } from 'bun:test';
 import handler from '../api/webhook.js';
-import { ADMINS, ENV, MC_FLOW, SICK_FLOW, doc, fakeBackend, groupText, photo, tap, text } from './fake.js';
+import { ADMINS, ENV, MC_FLOW, SICK_FLOW, USER, adminTap, doc, fakeBackend, groupText, photo, tap, text } from './fake.js';
 
 const realFetch = globalThis.fetch;
 let b;
@@ -34,7 +34,49 @@ test('sick flow sends the request to every admin', async () => {
   expect(post.text).toContain("I will wait for my commander's permission");
   expect(post.text).toContain('@pte_tan');
   expect(b.toUser().at(-1)).toContain('Submitted');
-  expect(b.store.size).toBe(0);
+  expect(b.store.has('form:111')).toBe(false);
+});
+
+const button = (admin) => b.toAdmin(admin)[0].reply_markup.inline_keyboard[0][0];
+const edits = () => b.calls.filter((c) => c.method === 'editMessageText' && ADMINS.includes(c.chat_id));
+
+test('approve marks every admin copy and tells the soldier', async () => {
+  await sendAll(SICK_FLOW);
+  const { text: label, callback_data } = button(ADMINS[0]);
+  expect(label).toBe('✅ Approve');
+  expect(button(ADMINS[1]).callback_data).toBe(callback_data);
+  const before = b.calls.length;
+  await send(adminTap(ADMINS[1], callback_data));
+  const done = edits();
+  expect(done.map((c) => [c.chat_id, c.message_id]))
+    .toEqual(ADMINS.map((a) => [a, b.toAdmin(a)[0].result.message_id]));
+  for (const e of done) {
+    expect(e.text).toContain('REQUEST TO REPORT SICK');
+    expect(e.text).toEndWith('✅ Admin B has approved');
+    expect(e.reply_markup).toBeUndefined();
+  }
+  expect(b.toUser().at(-1)).toBe(done[0].text);
+  const after = b.calls.length;
+  expect(after).toBeGreaterThan(before);
+  await send(adminTap(ADMINS[0], callback_data)); // second tap
+  expect(b.calls.slice(after).map((c) => c.method)).toEqual(['answerCallbackQuery']);
+});
+
+test('non-admin cannot approve', async () => {
+  await sendAll(SICK_FLOW);
+  await send(adminTap(USER.id, button(ADMINS[0]).callback_data));
+  expect(edits()).toHaveLength(0);
+});
+
+test('added to BatSys marks every admin copy, soldier not messaged', async () => {
+  await sendAll([...MC_FLOW, photo()]);
+  const { text: label, callback_data } = button(ADMINS[0]);
+  expect(label).toBe('Added to BatSys?');
+  const userMsgs = b.toUser().length;
+  await send(adminTap(ADMINS[0], callback_data));
+  expect(edits()).toHaveLength(2);
+  expect(edits().every((e) => e.text.endsWith('✅ Added to BatSys by Admin A'))).toBe(true);
+  expect(b.toUser()).toHaveLength(userMsgs);
 });
 
 test('rank question offers all ranks and mentions PTEs', async () => {

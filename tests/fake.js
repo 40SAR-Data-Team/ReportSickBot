@@ -26,6 +26,10 @@ export function fakeBackend() {
     if (cmd === 'GET') return { result: b.store.get(key) ?? null };
     if (cmd === 'SET') return b.store.set(key, val), { result: 'OK' };
     if (cmd === 'DEL') return { result: +b.store.delete(key) };
+    if (cmd === 'GETDEL') {
+      const v = b.store.get(key) ?? null;
+      return b.store.delete(key), { result: v };
+    }
     return { error: `unknown command ${cmd}` };
   };
   b.toAdmin = (admin) => b.calls.filter((c) => c.chat_id === admin);
@@ -43,6 +47,11 @@ export const doc = (mime_type) => message({ document: { file_id: 'dummy-doc', mi
 export const tap = (data) => ({
   update_id: ++id,
   callback_query: { id: `cb${id}`, from: USER, data, message: { message_id: 5, chat, text: 'question' } },
+});
+/** Button tap by `admin` on a submission in their own DM with the bot. */
+export const adminTap = (admin, data) => ({
+  update_id: ++id,
+  callback_query: { id: `cb${id}`, from: { id: admin }, data, message: { message_id: 7, chat: { id: admin, type: 'private' }, text: 'summary' } },
 });
 export const groupText = (t) => ({ update_id: ++id, message: { message_id: ++id, chat: { id: -1, type: 'group' }, from: USER, text: t } });
 
