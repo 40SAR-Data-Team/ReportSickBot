@@ -22,4 +22,10 @@ DM the bot `/start`. Send `/cancel` to abort. Unfinished forms expire after 1 ho
 
 ## Test
 
-`bun test`
+Run `bun test`. All tests use dummy data and never touch the real Telegram or Upstash.
+
+- `tests/unit.test.js`: date parsing.
+- `tests/integration.test.js`: calls the handler directly, with `fetch` mocked to an in-memory fake.
+- `tests/e2e.test.js`: posts over real HTTP to the webhook. Telegram and Upstash are replaced by a local dummy server.
+
+CI (`.github/workflows/test.yml`) runs the tests with coverage and uploads the results to Codecov. Add the repo on codecov.io, then set the `CODECOV_TOKEN` repo secret.

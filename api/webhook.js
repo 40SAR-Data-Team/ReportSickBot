@@ -33,7 +33,8 @@ export function parseDateTime(text, withTime) {
 }
 
 async function tg(method, body) {
-  const r = await fetch(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/${method}`, {
+  const api = process.env.TELEGRAM_API ?? 'https://api.telegram.org'; // overridden only by e2e tests
+  const r = await fetch(`${api}/bot${process.env.BOT_TOKEN}/${method}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { parseDateTime } from './api/webhook.js';
+import { parseDateTime } from '../api/webhook.js';
 
 test('parseDateTime', () => {
   expect(parseDateTime('10/10/2026 0830', true)).toEqual(new Date(Date.UTC(2026, 9, 10, 8, 30)));
