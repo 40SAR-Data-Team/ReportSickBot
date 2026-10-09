@@ -7,6 +7,7 @@ const TYPES = {
 const ACK = "I will wait for my commander's approval before I report sick";
 const PLEDGE = "I will seek my commander's approval before heading for my Medical Appointment";
 
+const FOR_ADMIN = '[For Admin]'; // prefix on everything the bot sends to admins
 const btn = (text, data) => ({ text, callback_data: data });
 /** Today's date in Singapore as DD/MM/YYYY. */
 const today = () => new Date().toLocaleDateString('en-GB', { timeZone: 'Asia/Singapore' });
@@ -99,8 +100,11 @@ async function submit(chat, s, from) {
   const file = s.file ?? s.shot;
   const list = admins();
   const results = await Promise.allSettled(list.map(async ([, admin]) => {
-    const sent = await tg('sendMessage', { chat_id: admin, text, reply_markup: { inline_keyboard: [[button]] } });
-    if (file) await tg('copyMessage', { chat_id: admin, from_chat_id: chat, message_id: file, reply_parameters: { message_id: sent.message_id } });
+    const sent = await tg('sendMessage', { chat_id: admin, text: `${FOR_ADMIN} ${text}`, reply_markup: { inline_keyboard: [[button]] } });
+    if (file) {
+      const caption = s.caption ? `${FOR_ADMIN} ${s.caption}` : FOR_ADMIN;
+      await tg('copyMessage', { chat_id: admin, from_chat_id: chat, message_id: file, caption, reply_parameters: { message_id: sent.message_id } });
+    }
     return [admin, sent.message_id];
   }));
   // An admin who never pressed Start on the bot can't be messaged; log it so they can be told.
@@ -120,7 +124,7 @@ async function act(cb) {
   const sub = JSON.parse((await redis('GETDEL', `sub:${cb.data.split(':')[1]}`)) ?? 'null');
   if (!sub) return;
   // ponytail: `?? rank+name line` only for subs stored before labels existed; drop after 7 days
-  const done = `✅ ${sub.label ?? sub.text.split('\n')[1]} ${sub.type === 'mc' ? 'added to BatSys' : 'approved'} by ${name}`;
+  const done = `${FOR_ADMIN} ✅ ${sub.label ?? sub.text.split('\n')[1]} ${sub.type === 'mc' ? 'added to BatSys' : 'approved'} by ${name}`;
   const results = await Promise.allSettled([
     ...sub.msgs.map(([chat_id, message_id]) => tg('editMessageText', { chat_id, message_id, text: done })),
     ...(sub.type !== 'mc' ? [tg('sendMessage', { chat_id: sub.user, text: `${sub.text}\n\n✅ ${name} has approved` })] : []),
@@ -168,6 +172,7 @@ async function handle(update) {
     const ok = m.photo || mime.startsWith('image/') || (s.step === 'file' && mime === 'application/pdf');
     if (!ok) return reply(s.step, s.step === 'file' ? 'Please send a photo or a PDF.' : 'Please send an image.');
     value = m.message_id;
+    s.caption = m.caption;
   } else {
     if (!text) return reply(s.step, 'Please type your answer.');
     // keeps the admin summary under Telegram's 4096-char message limit

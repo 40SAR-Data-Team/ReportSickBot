@@ -26,6 +26,7 @@ test('sick flow sends the request to every admin', async () => {
   const [post] = b.toAdmin(ADMINS[0]);
   expect(b.toAdmin(ADMINS[1])[0].text).toBe(post.text);
   expect(post.method).toBe('sendMessage');
+  expect(post.text).toStartWith('[For Admin] 🤒 REQUEST TO REPORT SICK');
   expect(post.text).toContain('REQUEST TO REPORT SICK');
   expect(post.text).toContain('PTE Tan Ah Kow');
   expect(post.text).toContain('Medical Condition: Fever and sore throat');
@@ -64,7 +65,7 @@ test('approve marks every admin copy and tells the soldier', async () => {
   expect(done.map((c) => [c.chat_id, c.message_id]))
     .toEqual(ADMINS.map((a) => [a, b.toAdmin(a)[0].result.message_id]));
   for (const e of done) {
-    expect(e.text).toBe('✅ PTE Tan Ah Kow, sick request approved by Admin B');
+    expect(e.text).toBe('[For Admin] ✅ PTE Tan Ah Kow, sick request approved by Admin B');
     expect(e.reply_markup).toBeUndefined();
   }
   expect(b.toUser().at(-1)).toContain('REQUEST TO REPORT SICK');
@@ -88,7 +89,7 @@ test('added to BatSys marks every admin copy, keeps file copies, soldier not mes
   const userMsgs = b.toUser().length;
   await send(adminTap(ADMINS[0], callback_data));
   expect(edits()).toHaveLength(2);
-  expect(edits().every((e) => e.text === '✅ CPL Lim Bee Hoon, MC 10/10/2026 to 12/10/2026 added to BatSys by Admin A')).toBe(true);
+  expect(edits().every((e) => e.text === '[For Admin] ✅ CPL Lim Bee Hoon, MC 10/10/2026 to 12/10/2026 added to BatSys by Admin A')).toBe(true);
   expect(b.calls.filter((c) => c.method === 'deleteMessage' && ADMINS.includes(c.chat_id))).toHaveLength(0); // file copies kept
   expect(b.toUser()).toHaveLength(userMsgs);
 });
@@ -109,7 +110,7 @@ test('appointment flow sends summary + screenshot; approve shrinks copies and te
   const { text: label, callback_data } = button(ADMINS[0]);
   expect(label).toBe('✅ Approve');
   await send(adminTap(ADMINS[0], callback_data));
-  expect(edits().every((e) => e.text === '✅ PTE Tan Ah Kow, medical appointment 20/10/2026 1400 approved by Admin A')).toBe(true);
+  expect(edits().every((e) => e.text === '[For Admin] ✅ PTE Tan Ah Kow, medical appointment 20/10/2026 1400 approved by Admin A')).toBe(true);
   expect(b.toUser().at(-1)).toEndWith('✅ Admin A has approved');
 });
 
@@ -132,7 +133,7 @@ test.each([['PDF', () => doc('application/pdf')], ['photo', photo], ['image docu
       expect(post.text).toContain('CPL Lim Bee Hoon');
       expect(post.text).toContain('Reason / Status: Sprained ankle, light duty');
       expect(post.text).toContain('From 10/10/2026 to 12/10/2026');
-      expect(copy).toMatchObject({ method: 'copyMessage', from_chat_id: 111, message_id: f.message.message_id });
+      expect(copy).toMatchObject({ method: 'copyMessage', from_chat_id: 111, message_id: f.message.message_id, caption: '[For Admin]' });
       expect(copy.reply_parameters.message_id).toBe(post.result.message_id);
     }
   },
