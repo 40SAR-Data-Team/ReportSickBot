@@ -1,7 +1,7 @@
 // Calls the handler directly with fetch mocked to the dummy backend.
 import { afterAll, beforeEach, expect, test } from 'bun:test';
 import handler from '../api/webhook.js';
-import { ADMINS, ENV, MC_FLOW, SICK_FLOW, USER, adminTap, doc, fakeBackend, groupText, photo, tap, text } from './fake.js';
+import { ADMINS, APPT_FLOW, ENV, MC_FLOW, SICK_FLOW, USER, adminTap, doc, fakeBackend, groupText, photo, tap, text } from './fake.js';
 
 const realFetch = globalThis.fetch;
 let b;
@@ -81,7 +81,7 @@ test('non-admin cannot approve', async () => {
   expect(edits()).toHaveLength(0);
 });
 
-test('added to BatSys marks every admin copy, soldier not messaged', async () => {
+test('added to BatSys marks every admin copy, keeps file copies, soldier not messaged', async () => {
   await sendAll([...MC_FLOW, photo()]);
   const { text: label, callback_data } = button(ADMINS[0]);
   expect(label).toBe('Added to BatSys?');
@@ -89,9 +89,28 @@ test('added to BatSys marks every admin copy, soldier not messaged', async () =>
   await send(adminTap(ADMINS[0], callback_data));
   expect(edits()).toHaveLength(2);
   expect(edits().every((e) => e.text === '✅ CPL Lim Bee Hoon, MC 10/10/2026 to 12/10/2026 added to BatSys by Admin A')).toBe(true);
-  const files = ADMINS.map((a) => [a, b.toAdmin(a).find((c) => c.method === 'copyMessage').result.message_id]);
-  expect(b.calls.filter((c) => c.method === 'deleteMessage').map((c) => [c.chat_id, c.message_id])).toEqual(files);
+  expect(b.calls.filter((c) => c.method === 'deleteMessage' && ADMINS.includes(c.chat_id))).toHaveLength(0); // file copies kept
   expect(b.toUser()).toHaveLength(userMsgs);
+});
+
+test('appointment flow sends summary + screenshot; approve shrinks copies and tells the soldier', async () => {
+  await sendAll([...APPT_FLOW.slice(0, -2), doc('application/pdf')]);
+  expect(b.toUser().at(-1)).toContain('Please send an image');
+  await sendAll([photo(), tap('pledge:yes')]);
+  for (const admin of ADMINS) {
+    const [post, copy] = b.toAdmin(admin);
+    expect(post.text).toContain('REQUEST TO ATTEND MEDICAL APPOINTMENT');
+    expect(post.text).toContain('Reason: Eczema');
+    expect(post.text).toContain('Time: 20/10/2026 1400');
+    expect(post.text).toContain('Clinic: SGH Dermatology');
+    expect(post.text).toContain("I will seek my commander's approval");
+    expect(copy.method).toBe('copyMessage');
+  }
+  const { text: label, callback_data } = button(ADMINS[0]);
+  expect(label).toBe('✅ Approve');
+  await send(adminTap(ADMINS[0], callback_data));
+  expect(edits().every((e) => e.text === '✅ PTE Tan Ah Kow, medical appointment 20/10/2026 1400 approved by Admin A')).toBe(true);
+  expect(b.toUser().at(-1)).toEndWith('✅ Admin A has approved');
 });
 
 test('rank question offers all ranks with the new wording', async () => {

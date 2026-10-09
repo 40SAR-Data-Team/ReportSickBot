@@ -1,6 +1,11 @@
 const RANKS =['REC', 'PTE', 'LCP', 'CPL', 'CFC', '3SG', '2SG', '2LT', 'LTA'];
-const TYPES = { sick: 'Request Permission to Report Sick', mc: 'Send MC / Status from the Doctor / MO' };
+const TYPES = {
+  sick: 'Request Permission to Report Sick',
+  appt: 'Request Permission to attend upcoming Medical Appointment',
+  mc: 'Send MC / Status from the Doctor / MO',
+};
 const ACK = "I will wait for my commander's approval before I report sick";
+const PLEDGE = "I will seek my commander's approval before heading for my Medical Appointment";
 
 const btn = (text, data) => ({ text, callback_data: data });
 /** Today's date in Singapore as DD/MM/YYYY. */
@@ -11,18 +16,28 @@ const QUESTIONS = {
   rank: ['What is your Rank?',
     [0, 3, 6].map((i) => RANKS.slice(i, i + 3).map((r) => btn(r, `rank:${r}`)))],
   name: ['What is your Name?'],
-  type: ['How may I help you?', [[btn(TYPES.sick, 'type:sick')], [btn(TYPES.mc, 'type:mc')]]],
+  type: ['How may I help you?', Object.entries(TYPES).map(([k, t]) => [btn(t, `type:${k}`)])],
   condition: ['What symptoms are you experiencing?'],
   clinic: ['Which clinic will you visit?'],
   time: ['What time will you visit the doctor? (24h format, e.g. 0830)'],
   ack: [`${ACK}.`, [[btn('✅ I acknowledge', 'ack:yes')]]],
+  purpose: ['Reason for Medical Appointment? (e.g Eczema, Spine Surgery)'],
+  when: ['When is your Medical Appointment? (DD/MM/YYYY HHMM)'],
+  venue: ['Which clinic is your Medical Appointment?'],
+  shot: ['Attach a screenshot / image of your Medical Appointment.'],
+  pledge: [`${PLEDGE}.`, [[btn('✅ I acknowledge', 'pledge:yes')]]],
   reason: ['What new status are you given / What is your reason for MC?'],
   start: ['Start Date of MC / Status? (DD/MM/YYYY)'],
   end: ['End Date of MC / Status? (DD/MM/YYYY)'],
   file: ['Attach your MC / Memo. (one photo or PDF)'],
 };
-const NEXT = { rank: 'name', name: 'type', condition: 'clinic', clinic: 'time', time: 'ack', reason: 'start', start: 'end', end: 'file' };
-const BUTTON_STEPS = new Set(['rank', 'type', 'ack']);
+// rank -> name -> type, then the chosen type's steps; after the last step, submit.
+const FLOWS = {
+  sick: ['condition', 'clinic', 'time', 'ack'],
+  appt: ['purpose', 'when', 'venue', 'shot', 'pledge'],
+  mc: ['reason', 'start', 'end', 'file'],
+};
+const BUTTON_STEPS = new Set(['rank', 'type', 'ack', 'pledge']);
 
 /** Parses "DD/MM/YYYY" (or "DD/MM/YYYY HHMM" if withTime); returns a Date or null if invalid. */
 export function parseDateTime(text, withTime) {
@@ -69,33 +84,35 @@ function ask(chat, step, prefix) {
 // ADMINS env var: JSON {"name": telegramId}. Unset means no admins, so the submit fails loudly.
 const admins = () => Object.entries(JSON.parse(process.env.ADMINS ?? '{}'));
 
-/** Sends the summary (and MC file) to every admin; returns the summary, or '' if no admin received it. */
+/** Sends the summary (and attached file) to every admin; returns the summary, or '' if no admin received it. */
 async function submit(chat, s, from) {
-  const lines = s.type === 'sick'
-    ? ['🤒 REQUEST TO REPORT SICK', `${s.rank} ${s.name}`, `Medical Condition: ${s.condition}`,
-      `Clinic: ${s.clinic}`, `Time: ${s.time}`, `✅ ${ACK}`]
-    : ['📄 MC / STATUS', `${s.rank} ${s.name}`, `Reason / Status: ${s.reason}`, `From ${s.start} to ${s.end}`];
+  const who = `${s.rank} ${s.name}`;
+  const lines = {
+    sick: ['🤒 REQUEST TO REPORT SICK', who, `Medical Condition: ${s.condition}`, `Clinic: ${s.clinic}`, `Time: ${s.time}`, `✅ ${ACK}`],
+    appt: ['🏥 REQUEST TO ATTEND MEDICAL APPOINTMENT', who, `Reason: ${s.purpose}`, `Time: ${s.when}`, `Clinic: ${s.venue}`, `✅ ${PLEDGE}`],
+    mc: ['📄 MC / STATUS', who, `Reason / Status: ${s.reason}`, `From ${s.start} to ${s.end}`],
+  }[s.type];
   lines.push(`Sent by: ${from.username ? `@${from.username}` : `user id ${from.id}`}`);
   const text = lines.join('\n');
   const id = crypto.randomUUID();
-  const button = s.type === 'sick' ? btn('✅ Approve', `approve:${id}`) : btn('Added to BatSys?', `batsys:${id}`);
+  const button = s.type === 'mc' ? btn('Added to BatSys?', `batsys:${id}`) : btn('✅ Approve', `approve:${id}`);
+  const file = s.file ?? s.shot;
   const list = admins();
   const results = await Promise.allSettled(list.map(async ([, admin]) => {
     const sent = await tg('sendMessage', { chat_id: admin, text, reply_markup: { inline_keyboard: [[button]] } });
-    if (s.type === 'sick') return [admin, sent.message_id];
-    const file = await tg('copyMessage', { chat_id: admin, from_chat_id: chat, message_id: s.file, reply_parameters: { message_id: sent.message_id } });
-    return [admin, sent.message_id, file.message_id];
+    if (file) await tg('copyMessage', { chat_id: admin, from_chat_id: chat, message_id: file, reply_parameters: { message_id: sent.message_id } });
+    return [admin, sent.message_id];
   }));
   // An admin who never pressed Start on the bot can't be messaged; log it so they can be told.
   results.forEach((r, i) => r.status === 'rejected' && console.error(`admin ${list[i].join(' ')}:`, r.reason));
   const msgs = results.filter((r) => r.status === 'fulfilled').map((r) => r.value);
   // ponytail: buttons go dead after 7 days, raise EX if admins act later
-  const label = `${s.rank} ${s.name}, ${s.type === 'sick' ? 'sick request' : `MC ${s.start} to ${s.end}`}`;
+  const label = `${who}, ${{ sick: 'sick request', appt: `medical appointment ${s.when}`, mc: `MC ${s.start} to ${s.end}` }[s.type]}`;
   if (msgs.length) await redis('SET', `sub:${id}`, JSON.stringify({ user: chat, type: s.type, text, label, msgs }), 'EX', 604800);
   return msgs.length ? text : '';
 }
 
-/** Admin tapped Approve / Added to BatSys: shrink every admin's copy to one line, tell the soldier if approved. */
+/** Admin tapped Approve / Added to BatSys: shrink every admin's summary to one line, tell the soldier if approved. */
 async function act(cb) {
   const name = admins().find(([, id]) => id === cb.from.id)?.[0];
   if (!name) return;
@@ -103,12 +120,10 @@ async function act(cb) {
   const sub = JSON.parse((await redis('GETDEL', `sub:${cb.data.split(':')[1]}`)) ?? 'null');
   if (!sub) return;
   // ponytail: `?? rank+name line` only for subs stored before labels existed; drop after 7 days
-  const done = `✅ ${sub.label ?? sub.text.split('\n')[1]} ${sub.type === 'sick' ? 'approved' : 'added to BatSys'} by ${name}`;
+  const done = `✅ ${sub.label ?? sub.text.split('\n')[1]} ${sub.type === 'mc' ? 'added to BatSys' : 'approved'} by ${name}`;
   const results = await Promise.allSettled([
     ...sub.msgs.map(([chat_id, message_id]) => tg('editMessageText', { chat_id, message_id, text: done })),
-    // MC file copy is no longer needed once it's in BatSys (fails after 48h, then just stays)
-    ...sub.msgs.filter((m) => m[2]).map(([chat_id, , message_id]) => tg('deleteMessage', { chat_id, message_id })),
-    ...(sub.type === 'sick' ? [tg('sendMessage', { chat_id: sub.user, text: `${sub.text}\n\n✅ ${name} has approved` })] : []),
+    ...(sub.type !== 'mc' ? [tg('sendMessage', { chat_id: sub.user, text: `${sub.text}\n\n✅ ${name} has approved` })] : []),
   ]);
   results.forEach((r) => r.status === 'rejected' && console.error('act:', r.reason));
 }
@@ -143,20 +158,22 @@ async function handle(update) {
     const [step, v] = cb?.data?.split(':') ?? [];
     if (step !== s.step) return cb ? undefined : reply(s.step, 'Please tap one of the buttons.'); // stale tap: ignore
     value = v;
-    const label = step === 'type' ? TYPES[v] : step === 'ack' ? 'Acknowledged' : v;
+    const label = step === 'type' ? TYPES[v] : step === 'ack' || step === 'pledge' ? 'Acknowledged' : v;
     await tg('editMessageText', { chat_id: chat, message_id: cb.message.message_id, text: `${cb.message.text}\n\n✔ ${label}` });
   } else if (cb) {
     return; // stale tap on an old keyboard
-  } else if (s.step === 'file') {
+  } else if (s.step === 'file' || s.step === 'shot') {
     const m = update.message;
-    const ok = m.photo || /^(application\/pdf|image\/)/.test(m.document?.mime_type ?? '');
-    if (!ok) return reply('file', 'Please send a photo or a PDF.');
+    const mime = m.document?.mime_type ?? '';
+    const ok = m.photo || mime.startsWith('image/') || (s.step === 'file' && mime === 'application/pdf');
+    if (!ok) return reply(s.step, s.step === 'file' ? 'Please send a photo or a PDF.' : 'Please send an image.');
     value = m.message_id;
   } else {
     if (!text) return reply(s.step, 'Please type your answer.');
     // keeps the admin summary under Telegram's 4096-char message limit
     if (text.length > 500) return reply(s.step, 'Too long, please keep it under 500 characters.');
     if (s.step === 'time' && !parseDateTime(`${today()} ${text}`, true)) return reply('time', 'Invalid time.');
+    if (s.step === 'when' && !parseDateTime(text, true)) return reply('when', 'Invalid date/time.');
     if ((s.step === 'start' || s.step === 'end') && !parseDateTime(text, false)) return reply(s.step, 'Invalid date.');
     if (s.step === 'end' && parseDateTime(text, false) < parseDateTime(s.start, false)) {
       return reply('end', 'End date cannot be before the start date.');
@@ -165,7 +182,8 @@ async function handle(update) {
   }
 
   s[s.step] = value;
-  const next = s.step === 'type' ? (value === 'sick' ? 'condition' : 'reason') : NEXT[s.step];
+  const flow = ['rank', 'name', 'type', ...(FLOWS[s.type] ?? [])];
+  const next = flow[flow.indexOf(s.step) + 1];
   if (next) {
     s.step = next;
     return reply(next);
