@@ -114,6 +114,28 @@ async function submit(chat, s, from) {
   return msgs.length ? { id, user: chat, type: s.type, text, label, msgs } : null;
 }
 
+/** Records a submission (and who acted on it) in its day's /overview list. Label only, no medical details. */
+async function log({ id, day, at, type, label }, by) {
+  await redis('HSET', `day:${day}`, id, JSON.stringify({ at, type, label, by }));
+  // outlives the 7-day sub, so a late tap still updates an existing day list
+  await redis('EXPIRE', `day:${day}`, 691200);
+}
+
+const SECTIONS = [['sick', '🤒 Report sick', 'approved'], ['appt', '🏥 Medical appointment', 'approved'], ['mc', '📄 MC / Status', 'added to BatSys']];
+
+/** Sends an admin today's submissions and whether each has been acted on. */
+async function overview(chat) {
+  const day = today();
+  const rows = ((await redis('HGETALL', `day:${day}`)) ?? []).filter((_, i) => i % 2).map((v) => JSON.parse(v))
+    .sort((a, b) => a.at.localeCompare(b.at));
+  const parts = SECTIONS.map(([type, title, verb]) => {
+    const lines = rows.filter((r) => r.type === type)
+      .map((r) => `${r.at} ${r.label} – ${r.by ? `✅ ${verb} by ${r.by}` : `⏳ not yet ${verb}`}`);
+    return `${title}\n${lines.join('\n') || 'None'}`;
+  });
+  return tg('sendMessage', { chat_id: chat, text: `${FOR_ADMIN} Overview for ${day}\n\n${parts.join('\n\n')}` });
+}
+
 /** Admin tapped Approve / Added to BatSys: shrink every admin's summary to one line, swap the soldier's summary for the outcome. */
 async function act(cb) {
   const name = admins().find(([, id]) => id === cb.from.id)?.[0];
@@ -129,6 +151,7 @@ async function act(cb) {
     tg('sendMessage', { chat_id: sub.user, text: `${sub.text}\n\n${outcome}` }),
     // the outcome message replaces the soldier's summary (fails after 48h, then both stay)
     ...(sub.summary ? [tg('deleteMessage', { chat_id: sub.user, message_id: sub.summary })] : []),
+    ...(sub.day ? [log(sub, name)] : []),
   ]);
   results.forEach((r) => r.status === 'rejected' && console.error('act:', r.reason));
 }
@@ -142,6 +165,7 @@ async function handle(update) {
   const text = update.message?.text?.trim();
   if (cb) await tg('answerCallbackQuery', { callback_query_id: cb.id });
   if (/^(approve|batsys):/.test(cb?.data)) return act(cb);
+  if (text === '/overview' && admins().some(([, id]) => id === update.message.from.id)) return overview(chat);
 
   if (text === '/start' || text === '/cancel') {
     await redis('DEL', key);
@@ -212,8 +236,11 @@ async function handle(update) {
   }
   const sent = await tg('sendMessage', { chat_id: chat, text: `${sub.text}\n\nSubmitted ✅ Send /start to submit another.` });
   sub.summary = sent.message_id;
+  sub.day = today();
+  sub.at = new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Singapore', hour: '2-digit', minute: '2-digit' });
   // ponytail: buttons go dead after 7 days, raise EX if admins act later
   await redis('SET', `sub:${sub.id}`, JSON.stringify(sub), 'EX', 604800);
+  await log(sub);
 }
 
 export default async function handler(req, res) {

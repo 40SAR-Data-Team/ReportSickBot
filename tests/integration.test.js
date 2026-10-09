@@ -1,7 +1,7 @@
 // Calls the handler directly with fetch mocked to the dummy backend.
 import { afterAll, beforeEach, expect, test } from 'bun:test';
 import handler from '../api/webhook.js';
-import { ADMINS, APPT_FLOW, ENV, MC_FLOW, SICK_FLOW, USER, adminTap, doc, fakeBackend, groupText, photo, tap, text } from './fake.js';
+import { ADMINS, APPT_FLOW, ENV, MC_FLOW, SICK_FLOW, USER, adminTap, adminText, doc, fakeBackend, groupText, photo, tap, text } from './fake.js';
 
 const realFetch = globalThis.fetch;
 let b;
@@ -115,6 +115,22 @@ test('appointment flow sends summary + screenshot; approve shrinks copies and te
   await send(adminTap(ADMINS[0], callback_data));
   expect(edits().every((e) => e.text === '[For Admin] ✅ PTE Tan Ah Kow, medical appointment 20/10/2026 1400 approved by Admin A')).toBe(true);
   expect(b.toUser().at(-1)).toEndWith('✅ Admin A has approved');
+});
+
+test('/overview lists today\'s submissions and their status for admins only', async () => {
+  await sendAll(SICK_FLOW);
+  await send(adminTap(ADMINS[1], button(ADMINS[0]).callback_data));
+  await sendAll([...MC_FLOW, photo()]);
+  await send(adminText(ADMINS[0], '/overview'));
+  const out = b.toAdmin(ADMINS[0]).at(-1).text.split('\n');
+  const day = new Date().toLocaleDateString('en-GB', { timeZone: 'Asia/Singapore' });
+  expect(out[0]).toBe(`[For Admin] Overview for ${day}`);
+  expect(out[3]).toMatch(/^\d\d:\d\d PTE Tan Ah Kow, sick request – ✅ approved by Admin B$/);
+  expect(out.slice(5, 7)).toEqual(['🏥 Medical appointment', 'None']);
+  expect(out[9]).toMatch(/^\d\d:\d\d CPL Lim Bee Hoon, MC 10\/10\/2026 to 12\/10\/2026 – ⏳ not yet added to BatSys$/);
+  expect(out.join('\n')).not.toContain('Fever'); // no medical details
+  await send(text('/overview')); // non-admin: starts a form instead
+  expect(b.toUser().at(-1)).toBe('What is your Rank?');
 });
 
 test('rank question offers all ranks with the new wording', async () => {

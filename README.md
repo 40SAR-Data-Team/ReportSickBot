@@ -37,9 +37,16 @@ If `ADMINS` already exists, run `vercel env rm ADMINS production` first.
 
 DM the bot `/start`. Send `/cancel` to abort. Unfinished forms expire after 1 hour.
 
-On submit, the bot deletes the form's questions and answers and leaves the soldier one summary message.
+There are three workflows: report sick, attend a medical appointment (with a screenshot), and send an MC / status (with a photo or PDF).
 
-Each admin's copy of a submission has a button. For a sick request it is **Approve**: tapping it shrinks every admin's copy to one line ("✅ PTE Tan, sick request approved by <admin>") and sends the soldier the summary with "✅ <admin> has approved". For an MC it is **Added to BatSys?**: tapping it shrinks every admin's copy to one line and deletes their copy of the file. The first tap wins. Buttons stop working after 7 days.
+The soldier's chat moves through three stages. Each stage replaces the one before it:
+1. The questions and answers.
+2. One summary message, sent on submit.
+3. The commander's outcome: the summary plus "✅ <admin> has approved" (sick or appointment) or "✅ Added to BatSys by <admin>" (MC).
+
+Every message to admins starts with `[For Admin]`. Each admin's copy has a button: **Approve** for a sick request or an appointment, **Added to BatSys?** for an MC. Tapping it shrinks every admin's copy to one line, e.g. "✅ PTE Tan, sick request approved by <admin>". Attached files stay. The first tap wins, and buttons stop working after 7 days.
+
+Admins can send `/overview` to see today's submissions (Singapore time) and whether each has been approved or added to BatSys. It shows names only, no medical details.
 
 Telegram doesn't let bots delete messages older than 48 hours, so those stay.
 

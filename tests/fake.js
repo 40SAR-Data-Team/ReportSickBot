@@ -22,7 +22,10 @@ export function fakeBackend() {
       call.result = method === 'sendMessage' || method === 'copyMessage' ? { message_id: ++b.nextId } : true;
       return { ok: true, result: call.result };
     }
-    const [cmd, key, val] = body;
+    const [cmd, key, val, val2] = body;
+    if (cmd === 'HSET') return b.store.set(key, new Map(b.store.get(key)).set(val, val2)), { result: 1 };
+    if (cmd === 'HGETALL') return { result: [...(b.store.get(key) ?? [])].flat() };
+    if (cmd === 'EXPIRE') return { result: +b.store.has(key) };
     if (cmd === 'GET') return { result: b.store.get(key) ?? null };
     if (cmd === 'SET') return b.store.set(key, val), { result: 'OK' };
     if (cmd === 'DEL') return { result: +b.store.delete(key) };
@@ -53,7 +56,12 @@ export const adminTap = (admin, data) => ({
   update_id: ++id,
   callback_query: { id: `cb${id}`, from: { id: admin }, data, message: { message_id: 7, chat: { id: admin, type: 'private' }, text: 'summary' } },
 });
-export const groupText = (t) => ({ update_id: ++id, message: { message_id: ++id, chat: { id: -1, type: 'group' }, from: USER, text: t } });
+/** Text message from `admin` in their own DM with the bot. */
+export const adminText = (admin, t) => ({
+  update_id: ++id,
+  message: { message_id: ++id, chat: { id: admin, type: 'private' }, from: { id: admin }, text: t },
+});
+export const groupText =(t) => ({ update_id: ++id, message: { message_id: ++id, chat: { id: -1, type: 'group' }, from: USER, text: t } });
 
 export const SICK_FLOW = [text('/start'), tap('rank:PTE'), text('Tan Ah Kow'), tap('type:sick'),
   text('Fever and sore throat'), text('Kranji Medical Centre'), text('0830'), tap('ack:yes')];
