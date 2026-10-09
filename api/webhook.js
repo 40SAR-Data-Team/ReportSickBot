@@ -113,6 +113,8 @@ async function handle(update) {
     value = m.message_id;
   } else {
     if (!text) return ask(chat, s.step, 'Please type your answer.');
+    // keeps the group summary under Telegram's 4096-char message limit
+    if (text.length > 500) return ask(chat, s.step, 'Too long, please keep it under 500 characters.');
     if (s.step === 'time' && !parseDateTime(text, true)) return ask(chat, 'time', 'Invalid date/time.');
     if ((s.step === 'start' || s.step === 'end') && !parseDateTime(text, false)) return ask(chat, s.step, 'Invalid date.');
     if (s.step === 'end' && parseDateTime(text, false) < parseDateTime(s.start, false)) {

@@ -103,6 +103,12 @@ test('text at a button step re-asks; stale taps are ignored', async () => {
   expect(JSON.parse(b.store.get('form:111'))).toEqual({ step: 'name', rank: 'PTE' });
 });
 
+test('overlong answer is rejected', async () => {
+  await sendAll([text('/start'), tap('rank:PTE'), text('x'.repeat(501))]);
+  expect(b.toUser().at(-1)).toContain('under 500 characters');
+  expect(JSON.parse(b.store.get('form:111')).step).toBe('name');
+});
+
 test('non-text answer at a text step is re-asked', async () => {
   await sendAll([text('/start'), tap('rank:PTE'), photo()]);
   expect(b.toUser().at(-1)).toContain('Please type your answer');
