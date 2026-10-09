@@ -3,7 +3,7 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createServer } from 'node:http';
 import handler from '../api/webhook.js';
-import { ENV, MC_FLOW, SICK_FLOW, doc, fakeBackend } from './fake.js';
+import { ADMINS, ENV, MC_FLOW, SICK_FLOW, doc, fakeBackend } from './fake.js';
 
 let b, upstream, app, webhookUrl;
 
@@ -43,15 +43,15 @@ test('rejects requests without the secret', async () => {
   expect((await post(SICK_FLOW[0], 'nope')).status).toBe(401);
 });
 
-test('sick request reaches the group over HTTP', async () => {
+test('sick request reaches the admins over HTTP', async () => {
   for (const u of SICK_FLOW) expect((await post(u)).status).toBe(200);
-  expect(b.toGroup().at(-1).text).toContain('REQUEST TO REPORT SICK');
+  expect(b.toAdmin(ADMINS[0]).at(-1).text).toContain('REQUEST TO REPORT SICK');
   expect(b.toUser().at(-1)).toContain('Submitted');
 });
 
-test('MC with PDF reaches the group over HTTP', async () => {
+test('MC with PDF reaches the admins over HTTP', async () => {
   for (const u of [...MC_FLOW, doc('application/pdf')]) expect((await post(u)).status).toBe(200);
-  const [summary, file] = b.toGroup().slice(-2);
+  const [summary, file] = b.toAdmin(ADMINS[1]).slice(-2);
   expect(summary.text).toContain('MC / STATUS');
   expect(file.method).toBe('copyMessage');
   expect(b.store.size).toBe(0);

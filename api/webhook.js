@@ -1,4 +1,6 @@
-const RANKS = ['REC', 'PTE', 'LCP', 'CPL', 'CFC', '3SG', '2SG', '2LT', 'LTA'];
+import config from '../config.json' with { type: 'json' };
+
+const RANKS =['REC', 'PTE', 'LCP', 'CPL', 'CFC', '3SG', '2SG', '2LT', 'LTA'];
 const TYPES = { sick: 'Request Permission to Report Sick', mc: 'Send MC / Status from the Doctor / MO' };
 const ACK = "I will wait for my commander's permission before reporting sick";
 
@@ -64,17 +66,22 @@ function ask(chat, step, prefix) {
   });
 }
 
+/** Sends the summary (and MC file) to every admin; returns how many admins received it. */
 async function submit(chat, s, from) {
-  const group = process.env.GROUP_CHAT_ID;
   const lines = s.type === 'sick'
     ? ['🤒 REQUEST TO REPORT SICK', `${s.rank} ${s.name}`, `Medical Condition: ${s.condition}`,
       `Clinic: ${s.clinic}`, `Time: ${s.time}`, `✅ ${ACK}`]
     : ['📄 MC / STATUS', `${s.rank} ${s.name}`, `Reason / Status: ${s.reason}`, `From ${s.start} to ${s.end}`];
   lines.push(`Sent by: ${from.username ? `@${from.username}` : `user id ${from.id}`}`);
-  const sent = await tg('sendMessage', { chat_id: group, text: lines.join('\n') });
-  if (s.type === 'mc') {
-    await tg('copyMessage', { chat_id: group, from_chat_id: chat, message_id: s.file, reply_parameters: { message_id: sent.message_id } });
-  }
+  const results = await Promise.allSettled(config.admins.map(async (admin) => {
+    const sent = await tg('sendMessage', { chat_id: admin, text: lines.join('\n') });
+    if (s.type === 'mc') {
+      await tg('copyMessage', { chat_id: admin, from_chat_id: chat, message_id: s.file, reply_parameters: { message_id: sent.message_id } });
+    }
+  }));
+  // An admin who never pressed Start on the bot can't be messaged; log it so they can be told.
+  results.forEach((r, i) => r.status === 'rejected' && console.error(`admin ${config.admins[i]}:`, r.reason));
+  return results.filter((r) => r.status === 'fulfilled').length;
 }
 
 async function handle(update) {
@@ -113,7 +120,7 @@ async function handle(update) {
     value = m.message_id;
   } else {
     if (!text) return ask(chat, s.step, 'Please type your answer.');
-    // keeps the group summary under Telegram's 4096-char message limit
+    // keeps the admin summary under Telegram's 4096-char message limit
     if (text.length > 500) return ask(chat, s.step, 'Too long, please keep it under 500 characters.');
     if (s.step === 'time' && !parseDateTime(text, true)) return ask(chat, 'time', 'Invalid date/time.');
     if ((s.step === 'start' || s.step === 'end') && !parseDateTime(text, false)) return ask(chat, s.step, 'Invalid date.');
@@ -132,11 +139,8 @@ async function handle(update) {
   }
 
   // Last step done. State is not advanced, so on failure the user can just retry the last step.
-  try {
-    await submit(chat, s, update.message?.from ?? cb.from);
-  } catch (e) {
-    console.error(e);
-    return tg('sendMessage', { chat_id: chat, text: 'Failed to send to the group. Please try again.' });
+  if (!(await submit(chat, s, update.message?.from ?? cb.from))) {
+    return tg('sendMessage', { chat_id: chat, text: 'Failed to send to your commanders. Please try again.' });
   }
   await redis('DEL', key);
   return tg('sendMessage', { chat_id: chat, text: 'Submitted ✅ Send /start to submit another.' });

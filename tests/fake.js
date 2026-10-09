@@ -1,24 +1,23 @@
 // Dummy Telegram + Upstash backend and update builders shared by integration and e2e tests.
 
-export const GROUP = '-100999';
+export const ADMINS = [901, 902];
 export const USER = { id: 111, username: 'pte_tan' };
 
 export const ENV = {
   BOT_TOKEN: 'dummy-token',
-  GROUP_CHAT_ID: GROUP,
   WEBHOOK_SECRET: 'dummy-secret',
   KV_REST_API_TOKEN: 'dummy-kv-token',
 };
 
-/** In-memory fake: records Telegram calls, stores Redis keys. Set `fail` to a method name to make group calls fail. */
+/** In-memory fake: records Telegram calls, stores Redis keys. Add chat ids to `failFor` to make calls to them fail. */
 export function fakeBackend() {
-  const b = { store: new Map(), calls: [], fail: null, nextId: 1000 };
+  const b = { store: new Map(), calls: [], failFor: new Set(), nextId: 1000 };
   b.respond = (url, body) => {
     if (url.includes('/bot')) {
       const method = url.split('/').pop();
       const call = { method, ...body };
       b.calls.push(call);
-      if (method === b.fail && body.chat_id === GROUP) return { ok: false, description: 'dummy failure' };
+      if (b.failFor.has(body.chat_id)) return { ok: false, description: 'dummy failure' };
       call.result = method === 'sendMessage' ? { message_id: ++b.nextId } : true;
       return { ok: true, result: call.result };
     }
@@ -28,7 +27,7 @@ export function fakeBackend() {
     if (cmd === 'DEL') return { result: +b.store.delete(key) };
     return { error: `unknown command ${cmd}` };
   };
-  b.toGroup = () => b.calls.filter((c) => c.chat_id === GROUP);
+  b.toAdmin = (admin) => b.calls.filter((c) => c.chat_id === admin);
   b.toUser = () => b.calls.filter((c) => c.chat_id === USER.id && c.method === 'sendMessage').map((c) => c.text);
   return b;
 }
