@@ -67,7 +67,7 @@ function ask(chat, step, prefix) {
 // ADMINS env var: JSON {"name": telegramId}. Unset means no admins, so the submit fails loudly.
 const admins = () => Object.entries(JSON.parse(process.env.ADMINS ?? '{}'));
 
-/** Sends the summary (and MC file) to every admin; returns how many admins received it. */
+/** Sends the summary (and MC file) to every admin; returns the summary, or '' if no admin received it. */
 async function submit(chat, s, from) {
   const lines = s.type === 'sick'
     ? ['🤒 REQUEST TO REPORT SICK', `${s.rank} ${s.name}`, `Medical Condition: ${s.condition}`,
@@ -90,7 +90,7 @@ async function submit(chat, s, from) {
   const msgs = results.filter((r) => r.status === 'fulfilled').map((r) => r.value);
   // ponytail: buttons go dead after 7 days, raise EX if admins act later
   if (msgs.length) await redis('SET', `sub:${id}`, JSON.stringify({ user: chat, type: s.type, text, msgs }), 'EX', 604800);
-  return msgs.length;
+  return msgs.length ? text : '';
 }
 
 /** Admin tapped Approve / Added to BatSys: mark every admin's copy done, tell the soldier if approved. */
@@ -123,16 +123,20 @@ async function handle(update) {
     if (text === '/cancel') return tg('sendMessage', { chat_id: chat, text: 'Cancelled. Send /start to begin again.' });
   }
 
-  const s = JSON.parse((await redis('GET', key)) ?? 'null');
-  if (!s) {
-    await redis('SET', key, JSON.stringify({ step: 'rank' }), 'EX', 3600);
-    return ask(chat, 'rank');
-  }
+  let s = JSON.parse((await redis('GET', key)) ?? 'null');
+  const fresh = !s;
+  s ??= { step: 'rank' };
+  // Every message in the form (both sides) is tracked, then deleted on submit.
+  s.ids ??= [];
+  if (update.message) s.ids.push(update.message.message_id);
+  const save = () => redis('SET', key, JSON.stringify(s), 'EX', 3600);
+  const reply = async (step, prefix) => { s.ids.push((await ask(chat, step, prefix)).message_id); return save(); };
+  if (fresh) return reply('rank');
 
   let value;
   if (BUTTON_STEPS.has(s.step)) {
     const [step, v] = cb?.data?.split(':') ?? [];
-    if (step !== s.step) return cb ? undefined : ask(chat, s.step, 'Please tap one of the buttons.'); // stale tap: ignore
+    if (step !== s.step) return cb ? undefined : reply(s.step, 'Please tap one of the buttons.'); // stale tap: ignore
     value = v;
     const label = step === 'type' ? TYPES[v] : step === 'ack' ? 'Acknowledged' : v;
     await tg('editMessageText', { chat_id: chat, message_id: cb.message.message_id, text: `${cb.message.text}\n\n✔ ${label}` });
@@ -141,16 +145,16 @@ async function handle(update) {
   } else if (s.step === 'file') {
     const m = update.message;
     const ok = m.photo || /^(application\/pdf|image\/)/.test(m.document?.mime_type ?? '');
-    if (!ok) return ask(chat, 'file', 'Please send a photo or a PDF.');
+    if (!ok) return reply('file', 'Please send a photo or a PDF.');
     value = m.message_id;
   } else {
-    if (!text) return ask(chat, s.step, 'Please type your answer.');
+    if (!text) return reply(s.step, 'Please type your answer.');
     // keeps the admin summary under Telegram's 4096-char message limit
-    if (text.length > 500) return ask(chat, s.step, 'Too long, please keep it under 500 characters.');
-    if (s.step === 'time' && !parseDateTime(text, true)) return ask(chat, 'time', 'Invalid date/time.');
-    if ((s.step === 'start' || s.step === 'end') && !parseDateTime(text, false)) return ask(chat, s.step, 'Invalid date.');
+    if (text.length > 500) return reply(s.step, 'Too long, please keep it under 500 characters.');
+    if (s.step === 'time' && !parseDateTime(text, true)) return reply('time', 'Invalid date/time.');
+    if ((s.step === 'start' || s.step === 'end') && !parseDateTime(text, false)) return reply(s.step, 'Invalid date.');
     if (s.step === 'end' && parseDateTime(text, false) < parseDateTime(s.start, false)) {
-      return ask(chat, 'end', 'End date cannot be before the start date.');
+      return reply('end', 'End date cannot be before the start date.');
     }
     value = text;
   }
@@ -159,16 +163,25 @@ async function handle(update) {
   const next = s.step === 'type' ? (value === 'sick' ? 'condition' : 'reason') : NEXT[s.step];
   if (next) {
     s.step = next;
-    await redis('SET', key, JSON.stringify(s), 'EX', 3600);
-    return ask(chat, next);
+    return reply(next);
   }
 
   // Last step done. State is not advanced, so on failure the user can just retry the last step.
-  if (!(await submit(chat, s, update.message?.from ?? cb.from))) {
-    return tg('sendMessage', { chat_id: chat, text: 'Failed to send to your commanders. Please try again.' });
+  const summary = await submit(chat, s, update.message?.from ?? cb.from);
+  if (!summary) {
+    s.ids.push((await tg('sendMessage', { chat_id: chat, text: 'Failed to send to your commanders. Please try again.' })).message_id);
+    return save();
   }
   await redis('DEL', key);
-  return tg('sendMessage', { chat_id: chat, text: 'Submitted ✅ Send /start to submit another.' });
+  try {
+    // Telegram can't delete messages older than 48h; those just stay.
+    for (let i = 0; i < s.ids.length; i += 100) {
+      await tg('deleteMessages', { chat_id: chat, message_ids: s.ids.slice(i, i + 100) });
+    }
+  } catch (e) {
+    console.error('cleanup:', e);
+  }
+  return tg('sendMessage', { chat_id: chat, text: `${summary}\n\nSubmitted ✅ Send /start to submit another.` });
 }
 
 export default async function handler(req, res) {

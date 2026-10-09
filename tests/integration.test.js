@@ -37,6 +37,19 @@ test('sick flow sends the request to every admin', async () => {
   expect(b.store.has('form:111')).toBe(false);
 });
 
+test('submit deletes the whole form thread and leaves one summary', async () => {
+  const flow = [...SICK_FLOW.slice(0, 6), text('tomorrow'), ...SICK_FLOW.slice(6)];
+  await sendAll(flow);
+  const dels = b.calls.filter((c) => c.method === 'deleteMessages');
+  expect(dels).toHaveLength(1);
+  expect(dels[0].chat_id).toBe(USER.id);
+  const bot = b.calls.filter((c) => c.chat_id === USER.id && c.method === 'sendMessage').slice(0, -1);
+  const expected = [...flow.filter((u) => u.message).map((u) => u.message.message_id), ...bot.map((c) => c.result.message_id)];
+  expect(dels[0].message_ids.toSorted()).toEqual(expected.toSorted());
+  expect(b.toUser().at(-1)).toContain('REQUEST TO REPORT SICK');
+  expect(b.toUser().at(-1)).toEndWith('Submitted ✅ Send /start to submit another.');
+});
+
 const button = (admin) => b.toAdmin(admin)[0].reply_markup.inline_keyboard[0][0];
 const edits = () => b.calls.filter((c) => c.method === 'editMessageText' && ADMINS.includes(c.chat_id));
 
@@ -145,7 +158,7 @@ test('text at a button step re-asks; stale taps are ignored', async () => {
   expect(b.calls.slice(before).map((c) => c.method)).toEqual(['answerCallbackQuery']);
   await send(tap('rank:PTE'));
   await send(tap('rank:PTE')); // double tap on an old keyboard
-  expect(JSON.parse(b.store.get('form:111'))).toEqual({ step: 'name', rank: 'PTE' });
+  expect(JSON.parse(b.store.get('form:111'))).toMatchObject({ step: 'name', rank: 'PTE' });
 });
 
 test('overlong answer is rejected', async () => {
