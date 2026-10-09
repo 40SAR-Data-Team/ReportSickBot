@@ -30,8 +30,8 @@ test('sick flow sends the request to every admin', async () => {
   expect(post.text).toContain('PTE Tan Ah Kow');
   expect(post.text).toContain('Medical Condition: Fever and sore throat');
   expect(post.text).toContain('Clinic: Kranji Medical Centre');
-  expect(post.text).toContain('Time: 10/10/2026 0830');
-  expect(post.text).toContain("I will wait for my commander's permission");
+  expect(post.text).toContain(`Time: ${new Date().toLocaleDateString('en-GB', { timeZone: 'Asia/Singapore' })} 0830`);
+  expect(post.text).toContain("I will wait for my commander's approval");
   expect(post.text).toContain('@pte_tan');
   expect(b.toUser().at(-1)).toContain('Submitted');
   expect(b.store.has('form:111')).toBe(false);
@@ -94,10 +94,10 @@ test('added to BatSys marks every admin copy, soldier not messaged', async () =>
   expect(b.toUser()).toHaveLength(userMsgs);
 });
 
-test('rank question offers all ranks and mentions PTEs', async () => {
+test('rank question offers all ranks with the new wording', async () => {
   await send(text('/start'));
   const q = b.calls.find((c) => c.method === 'sendMessage');
-  expect(q.text).toContain('most of you are PTEs');
+  expect(q.text).toBe('What is your Rank?');
   expect(q.reply_markup.inline_keyboard.flat().map((k) => k.text))
     .toEqual(['REC', 'PTE', 'LCP', 'CPL', 'CFC', '3SG', '2SG', '2LT', 'LTA']);
 });
@@ -135,10 +135,10 @@ test('ignores group chats', async () => {
   expect(b.calls).toHaveLength(0);
 });
 
-test('invalid date/time is re-asked without advancing', async () => {
+test('invalid time is re-asked without advancing', async () => {
   await sendAll(SICK_FLOW.slice(0, 6));
   await send(text('tomorrow morning'));
-  expect(b.toUser().at(-1)).toContain('Invalid date/time');
+  expect(b.toUser().at(-1)).toContain('Invalid time');
   expect(JSON.parse(b.store.get('form:111')).step).toBe('time');
 });
 
@@ -205,7 +205,7 @@ test('/cancel clears the form; next message restarts', async () => {
   expect(b.store.size).toBe(0);
   expect(b.toUser().at(-1)).toContain('Cancelled');
   await send(text('hello'));
-  expect(b.toUser().at(-1)).toContain('Select your rank');
+  expect(b.toUser().at(-1)).toContain('What is your Rank?');
 });
 
 test('backend errors still return 200', async () => {
