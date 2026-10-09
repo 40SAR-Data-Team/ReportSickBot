@@ -88,8 +88,8 @@ async function submit(chat, s, from) {
   // An admin who never pressed Start on the bot can't be messaged; log it so they can be told.
   results.forEach((r, i) => r.status === 'rejected' && console.error(`admin ${list[i].join(' ')}:`, r.reason));
   const msgs = results.filter((r) => r.status === 'fulfilled').map((r) => r.value);
-  // ponytail: buttons go dead after 30 days, raise EX if admins act later
-  if (msgs.length) await redis('SET', `sub:${id}`, JSON.stringify({ user: chat, type: s.type, text, msgs }), 'EX', 2592000);
+  // ponytail: buttons go dead after 7 days, raise EX if admins act later
+  if (msgs.length) await redis('SET', `sub:${id}`, JSON.stringify({ user: chat, type: s.type, text, msgs }), 'EX', 604800);
   return msgs.length;
 }
 
