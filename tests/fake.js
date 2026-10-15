@@ -37,6 +37,8 @@ export function fakeBackend() {
   };
   b.toAdmin = (admin) => b.calls.filter((c) => c.chat_id === admin);
   b.toUser = () => b.calls.filter((c) => c.chat_id === USER.id && c.method === 'sendMessage').map((c) => c.text);
+  /** Last edit of the soldier's summary message (the only user-chat edit that isn't a "✔ choice" tap). */
+  b.userEdit = () => b.calls.findLast((c) => c.chat_id === USER.id && c.method === 'editMessageText' && !c.text.includes('✔'))?.text;
   return b;
 }
 

@@ -61,5 +61,5 @@ test('admin approval reaches the soldier over HTTP', async () => {
   for (const u of SICK_FLOW) await post(u);
   const sent = b.toAdmin(ADMINS[0]).findLast((c) => c.method === 'sendMessage');
   expect((await post(adminTap(ADMINS[0], sent.reply_markup.inline_keyboard[0][0].callback_data))).status).toBe(200);
-  expect(b.toUser().at(-1)).toEndWith('✅ Admin A has approved');
+  expect(b.userEdit()).toEndWith('\n\n✅ Admin A has approved');
 });

@@ -65,13 +65,16 @@ test('approve marks every admin copy and tells the soldier', async () => {
   expect(done.map((c) => [c.chat_id, c.message_id]))
     .toEqual(ADMINS.map((a) => [a, b.toAdmin(a)[0].result.message_id]));
   for (const e of done) {
-    expect(e.text).toBe('[For Admin] ✅ PTE Tan Ah Kow, sick request approved by Admin B');
+    expect(e.text).toStartWith('[For Admin] 🤒 REQUEST TO REPORT SICK');
+    expect(e.text).toContain('Medical Condition: Fever and sore throat');
+    expect(e.text).toEndWith('\n\n✅ Admin B has approved');
     expect(e.reply_markup).toBeUndefined();
   }
-  expect(b.toUser().at(-1)).toContain('REQUEST TO REPORT SICK');
-  expect(b.toUser().at(-1)).toEndWith('✅ Admin B has approved');
+  expect(b.userEdit()).toContain('Medical Condition: Fever and sore throat');
+  expect(b.userEdit()).toEndWith('\n\n✅ Admin B has approved');
   const summary = b.calls.findLast((c) => c.chat_id === USER.id && c.text?.includes('Submitted')).result.message_id;
-  expect(b.calls.filter((c) => c.method === 'deleteMessage').map((c) => [c.chat_id, c.message_id])).toEqual([[USER.id, summary]]);
+  expect(b.calls.findLast((c) => c.chat_id === USER.id && c.method === 'editMessageText').message_id).toBe(summary);
+  expect(b.calls.filter((c) => c.method === 'deleteMessage')).toHaveLength(0);
   const after = b.calls.length;
   expect(after).toBeGreaterThan(before);
   await send(adminTap(ADMINS[0], callback_data)); // second tap
@@ -91,10 +94,11 @@ test('added to BatSys marks every admin copy, keeps file copies, tells the soldi
   const userMsgs = b.toUser().length;
   await send(adminTap(ADMINS[0], callback_data));
   expect(edits()).toHaveLength(2);
-  expect(edits().every((e) => e.text === '[For Admin] ✅ CPL Lim Bee Hoon, MC 10/10/2026 to 12/10/2026 added to BatSys by Admin A')).toBe(true);
+  expect(edits().every((e) => e.text.includes('Reason / Status: Sprained ankle') && e.text.endsWith('\n\n✅ Added to BatSys by Admin A'))).toBe(true);
   expect(b.calls.filter((c) => c.method === 'deleteMessage' && ADMINS.includes(c.chat_id))).toHaveLength(0); // file copies kept
-  expect(b.toUser()).toHaveLength(userMsgs + 1);
-  expect(b.toUser().at(-1)).toEndWith('✅ Added to BatSys by Admin A');
+  expect(b.toUser()).toHaveLength(userMsgs);
+  expect(b.userEdit()).toContain('Reason / Status: Sprained ankle');
+  expect(b.userEdit()).toEndWith('\n\n✅ Added to BatSys by Admin A');
 });
 
 test('appointment flow sends summary + screenshot; approve shrinks copies and tells the soldier', async () => {
@@ -113,8 +117,9 @@ test('appointment flow sends summary + screenshot; approve shrinks copies and te
   const { text: label, callback_data } = button(ADMINS[0]);
   expect(label).toBe('✅ Approve');
   await send(adminTap(ADMINS[0], callback_data));
-  expect(edits().every((e) => e.text === '[For Admin] ✅ PTE Tan Ah Kow, medical appointment 20/10/2026 1400 approved by Admin A')).toBe(true);
-  expect(b.toUser().at(-1)).toEndWith('✅ Admin A has approved');
+  expect(edits().every((e) => e.text.includes('Reason: Eczema') && e.text.endsWith('\n\n✅ Admin A has approved'))).toBe(true);
+  expect(b.userEdit()).toContain('Reason: Eczema');
+  expect(b.userEdit()).toEndWith('\n\n✅ Admin A has approved');
 });
 
 test('/overview lists today\'s submissions and their status for admins only', async () => {

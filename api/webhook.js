@@ -143,14 +143,11 @@ async function act(cb) {
   // GETDEL is atomic: a second tap, or two admins tapping at once, gets null.
   const sub = JSON.parse((await redis('GETDEL', `sub:${cb.data.split(':')[1]}`)) ?? 'null');
   if (!sub) return;
-  // ponytail: `?? rank+name line` only for subs stored before labels existed; drop after 7 days
-  const done = `${FOR_ADMIN} ✅ ${sub.label ?? sub.text.split('\n')[1]} ${sub.type === 'mc' ? 'added to BatSys' : 'approved'} by ${name}`;
-  const outcome = sub.type === 'mc' ? `✅ Added to BatSys by ${name}` : `✅ ${name} has approved`;
+  // details stay as a ledger; the outcome is appended below them (no reply_markup: button removed)
+  const body = `${sub.text}\n\n${sub.type === 'mc' ? `✅ Added to BatSys by ${name}` : `✅ ${name} has approved`}`;
   const results = await Promise.allSettled([
-    ...sub.msgs.map(([chat_id, message_id]) => tg('editMessageText', { chat_id, message_id, text: done })),
-    tg('sendMessage', { chat_id: sub.user, text: `${sub.text}\n\n${outcome}` }),
-    // the outcome message replaces the soldier's summary (fails after 48h, then both stay)
-    ...(sub.summary ? [tg('deleteMessage', { chat_id: sub.user, message_id: sub.summary })] : []),
+    ...sub.msgs.map(([chat_id, message_id]) => tg('editMessageText', { chat_id, message_id, text: `${FOR_ADMIN} ${body}` })),
+    tg('editMessageText', { chat_id: sub.user, message_id: sub.summary, text: body }),
     ...(sub.day ? [log(sub, name)] : []),
   ]);
   results.forEach((r) => r.status === 'rejected' && console.error('act:', r.reason));
