@@ -48,7 +48,7 @@ test('submit deletes the whole form thread and leaves one summary', async () => 
   const expected = [...flow.filter((u) => u.message).map((u) => u.message.message_id), ...bot.map((c) => c.result.message_id)];
   expect(dels[0].message_ids.toSorted()).toEqual(expected.toSorted());
   expect(b.toUser().at(-1)).toContain('REQUEST TO REPORT SICK');
-  expect(b.toUser().at(-1)).toEndWith('Submitted ✅ Send /start to submit another.');
+  expect(b.toUser().at(-1)).toEndWith('Submitted ✅');
 });
 
 const button = (admin) => b.toAdmin(admin)[0].reply_markup.inline_keyboard[0][0];
@@ -96,7 +96,10 @@ test('added to BatSys marks every admin copy, keeps file copies, tells the soldi
   expect(edits()).toHaveLength(2);
   expect(edits().every((e) => e.text.includes('Reason / Status: Sprained ankle') && e.text.endsWith('\n\n✅ Added to BatSys by Admin A'))).toBe(true);
   expect(b.calls.filter((c) => c.method === 'deleteMessage' && ADMINS.includes(c.chat_id))).toHaveLength(0); // file copies kept
-  expect(b.toUser()).toHaveLength(userMsgs);
+  expect(b.toUser()).toHaveLength(userMsgs + 1); // new reply so Telegram push-notifies
+  expect(b.toUser().at(-1)).toBe('✅ Added to BatSys by Admin A');
+  const reply = b.calls.findLast((c) => c.chat_id === USER.id && c.method === 'sendMessage');
+  expect(reply.reply_to_message_id).toBe(b.calls.findLast((c) => c.chat_id === USER.id && c.method === 'editMessageText').message_id);
   expect(b.userEdit()).toContain('Reason / Status: Sprained ankle');
   expect(b.userEdit()).toEndWith('\n\n✅ Added to BatSys by Admin A');
 });

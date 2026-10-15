@@ -144,10 +144,13 @@ async function act(cb) {
   const sub = JSON.parse((await redis('GETDEL', `sub:${cb.data.split(':')[1]}`)) ?? 'null');
   if (!sub) return;
   // details stay as a ledger; the outcome is appended below them (no reply_markup: button removed)
-  const body = `${sub.text}\n\n${sub.type === 'mc' ? `✅ Added to BatSys by ${name}` : `✅ ${name} has approved`}`;
+  const outcome = sub.type === 'mc' ? `✅ Added to BatSys by ${name}` : `✅ ${name} has approved`;
+  const body = `${sub.text}\n\n${outcome}`;
   const results = await Promise.allSettled([
     ...sub.msgs.map(([chat_id, message_id]) => tg('editMessageText', { chat_id, message_id, text: `${FOR_ADMIN} ${body}` })),
     tg('editMessageText', { chat_id: sub.user, message_id: sub.summary, text: body }),
+    // edits never push-notify; a new reply does
+    tg('sendMessage', { chat_id: sub.user, text: outcome, reply_to_message_id: sub.summary }),
     ...(sub.day ? [log(sub, name)] : []),
   ]);
   results.forEach((r) => r.status === 'rejected' && console.error('act:', r.reason));
@@ -231,7 +234,7 @@ async function handle(update) {
   } catch (e) {
     console.error('cleanup:', e);
   }
-  const sent = await tg('sendMessage', { chat_id: chat, text: `${sub.text}\n\nSubmitted ✅ Send /start to submit another.` });
+  const sent = await tg('sendMessage', { chat_id: chat, text: `${sub.text}\n\nSubmitted ✅` });
   sub.summary = sent.message_id;
   sub.day = today();
   sub.at = new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Singapore', hour: '2-digit', minute: '2-digit' });
