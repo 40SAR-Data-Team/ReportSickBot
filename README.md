@@ -44,9 +44,24 @@ The soldier's chat moves through three stages. Each stage replaces the one befor
 2. One summary message, sent on submit.
 3. The commander's outcome: the summary plus "✅ <admin> has approved" (sick or appointment) or "✅ Added to BatSys by <admin>" (MC).
 
-Every message to admins starts with `[For Admin]`. Each admin's copy has a button: **Approve** for a sick request or an appointment, **Added to BatSys?** for an MC. Tapping it shrinks every admin's copy to one line, e.g. "✅ PTE Tan, sick request approved by <admin>". Attached files stay. The first tap wins, and buttons stop working after 7 days.
+After the first submission, the bot remembers the soldier's rank and name and asks "Continue as PTE Tan?" next time.
 
-Admins can send `/overview` to see today's submissions (Singapore time) and whether each has been approved or added to BatSys. It shows names only, no medical details.
+Every message to admins starts with `[For Admin]`. Each admin's copy has buttons:
+- Sick request or appointment: **Approve** / **Reject**. Reject asks the admin for an optional reason (type it, or tap Skip). The soldier gets the reason and is told to send /start for a new request. The first decision wins. If another admin approves while you type, your prompt says "Already approved by <admin>".
+- MC: **Acknowledge** / **Added to BatSys?**. Each button works on its own and can be tapped by a different admin.
+
+A tap appends the outcome to every admin's copy and to the soldier's summary. It also sends the soldier a reply, so they get a notification. Attached files stay. Buttons stop working after 7 days.
+
+An MC / status must follow an approved sick or appointment request that has no MC yet. The approval reply has a **Send MC / Status** button that starts an MC already linked to that request. Through /start, the bot links the open request itself, or asks which one if there are several. With no open request, the MC is blocked. The MC summary appears as a reply to the request's summary, for both the soldier and the admins. Each request takes one MC. A sick request stays open for 7 days, an appointment until 7 days after the appointment.
+
+Admins can send `/overview` for today (Singapore time). It shows counts per type, who is still waiting for a decision or an acknowledgement, approved requests with no MC yet, and each submission's status. It shows names only, no medical details or reject reasons.
+
+To show `/start`, `/cancel` and `/overview` in Telegram's command menu, run once:
+
+```sh
+curl "https://api.telegram.org/bot<BOT_TOKEN>/setMyCommands" -H "content-type: application/json" \
+  -d '{"commands":[{"command":"start","description":"New request or MC"},{"command":"cancel","description":"Cancel the current form"},{"command":"overview","description":"Admins: today'"'"'s overview"}]}'
+```
 
 Telegram doesn't let bots delete messages older than 48 hours, so those stay.
 

@@ -24,11 +24,17 @@ export function fakeBackend() {
     }
     const [cmd, key, val, val2] = body;
     if (cmd === 'HSET') return b.store.set(key, new Map(b.store.get(key)).set(val, val2)), { result: 1 };
+    if (cmd === 'HSETNX') {
+      if (b.store.get(key)?.has(val)) return { result: 0 };
+      return b.store.set(key, new Map(b.store.get(key)).set(val, val2)), { result: 1 };
+    }
+    if (cmd === 'HGET') return { result: b.store.get(key)?.get(val) ?? null };
+    if (cmd === 'HDEL') return { result: +(b.store.get(key)?.delete(val) ?? 0) };
     if (cmd === 'HGETALL') return { result: [...(b.store.get(key) ?? [])].flat() };
     if (cmd === 'EXPIRE') return { result: +b.store.has(key) };
     if (cmd === 'GET') return { result: b.store.get(key) ?? null };
     if (cmd === 'SET') return b.store.set(key, val), { result: 'OK' };
-    if (cmd === 'DEL') return { result: +b.store.delete(key) };
+    if (cmd === 'DEL') return { result: body.slice(1).filter((k) => b.store.delete(k)).length };
     if (cmd === 'GETDEL') {
       const v = b.store.get(key) ?? null;
       return b.store.delete(key), { result: v };
@@ -67,7 +73,8 @@ export const groupText =(t) => ({ update_id: ++id, message: { message_id: ++id, 
 
 export const SICK_FLOW = [text('/start'), tap('rank:PTE'), text('Tan Ah Kow'), tap('type:sick'),
   text('Fever and sore throat'), text('Kranji Medical Centre'), text('0830'), tap('ack:yes')];
-export const MC_FLOW = [text('/start'), tap('rank:CPL'), text('Lim Bee Hoon'), tap('type:mc'),
+/** MC after an approved request: the profile saved by that request is reused, and its one grant auto-links. Add the file. */
+export const MC_FLOW = [text('/start'), tap('profile:yes'), tap('type:mc'),
   text('Sprained ankle, light duty'), text('10/10/2026'), text('12/10/2026')];
 export const APPT_FLOW = [text('/start'), tap('rank:PTE'), text('Tan Ah Kow'), tap('type:appt'),
   text('Eczema'), text('20/10/2026 1400'), text('SGH Dermatology'), photo(), tap('pledge:yes')];
