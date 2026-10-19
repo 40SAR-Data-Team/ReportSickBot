@@ -69,14 +69,13 @@ export const adminText = (admin, t) => ({
   update_id: ++id,
   message: { message_id: ++id, chat: { id: admin, type: 'private' }, from: { id: admin }, text: t },
 });
-/** `orig` (a text() update) edited to `t`. */
-export const edit = (orig, t) => ({ update_id: ++id, edited_message: { ...orig.message, text: t } });
 export const groupText =(t) => ({ update_id: ++id, message: { message_id: ++id, chat: { id: -1, type: 'group' }, from: USER, text: t } });
 
 export const SICK_FLOW = [text('/start'), tap('rank:PTE'), text('Tan Ah Kow'), tap('type:sick'),
-  text('Fever and sore throat'), text('Kranji Medical Centre'), text('0830'), tap('ack:yes')];
-/** MC after an approved request: the profile saved by that request is reused, and its one grant auto-links. Add the file. */
+  text('Fever and sore throat'), text('Kranji Medical Centre'), text('0830'), tap('ack:yes'), tap('review:yes')];
+/** MC after an approved request: the profile saved by that request is reused, and its one grant auto-links. Add the file, then `SUBMIT`. */
 export const MC_FLOW = [text('/start'), tap('profile:yes'), tap('type:mc'),
   text('Sprained ankle, light duty'), text('10/10/2026'), text('12/10/2026')];
+export const SUBMIT = tap('review:yes');
 export const APPT_FLOW = [text('/start'), tap('rank:PTE'), text('Tan Ah Kow'), tap('type:appt'),
-  text('Eczema'), text('20/10/2026 1400'), text('SGH Dermatology'), photo(), tap('pledge:yes')];
+  text('Eczema'), text('20/10/2026 1400'), text('SGH Dermatology'), photo(), tap('pledge:yes'), tap('review:yes')];

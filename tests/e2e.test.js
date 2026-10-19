@@ -3,7 +3,7 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createServer } from 'node:http';
 import handler from '../api/webhook.js';
-import { ADMINS, ENV, MC_FLOW, SICK_FLOW, adminTap, doc, fakeBackend } from './fake.js';
+import { ADMINS, ENV, MC_FLOW, SICK_FLOW, SUBMIT, adminTap, doc, fakeBackend } from './fake.js';
 
 let b, upstream, app, webhookUrl;
 
@@ -56,7 +56,7 @@ test('admin approval reaches the soldier over HTTP', async () => {
 });
 
 test('MC for the approved request reaches the admins over HTTP', async () => {
-  for (const u of [...MC_FLOW, doc('application/pdf')]) expect((await post(u)).status).toBe(200);
+  for (const u of [...MC_FLOW, doc('application/pdf'), SUBMIT]) expect((await post(u)).status).toBe(200);
   const [summary, file] = b.toAdmin(ADMINS[1]).slice(-2);
   expect(summary.text).toContain('MC / STATUS');
   expect(file.method).toBe('copyMessage');
