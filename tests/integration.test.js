@@ -1,7 +1,7 @@
 // Calls the handler directly with fetch mocked to the dummy backend.
 import { afterAll, beforeEach, expect, test } from 'bun:test';
 import handler from '../api/webhook.js';
-import { ADMINS, APPT_FLOW, ENV, MC_FLOW, SICK_FLOW, USER, adminTap, adminText, doc, edit, fakeBackend, groupText, photo, tap, text } from './fake.js';
+import { ADMINS, APPT_FLOW, ENV, MC_FLOW, SICK_FLOW, USER, adminTap, SUBMIT, adminText, doc, fakeBackend, groupText, photo, tap, text } from './fake.js';
 
 const realFetch = globalThis.fetch;
 let b;
@@ -144,7 +144,7 @@ test('reject loses to an approval made while the reason was being typed', async 
 
 test('MC threads under the approved request, then acknowledge and BatSys tick independently', async () => {
   await approveSick();
-  await sendAll([...MC_FLOW, photo()]);
+  await sendAll([...MC_FLOW, photo(), SUBMIT]);
   for (const admin of ADMINS) {
     const [sick, mc] = posts(admin);
     expect(mc.text).toContain('📄 MC / STATUS\nPTE Tan Ah Kow\nFor: 🤒 ');
@@ -191,7 +191,7 @@ test('MC without an approved request is blocked', async () => {
 
 test('the MC is consumed: a second MC for the same request is blocked', async () => {
   await approveSick();
-  await sendAll([...MC_FLOW, photo()]);
+  await sendAll([...MC_FLOW, photo(), SUBMIT]);
   await sendAll(MC_FLOW.slice(0, 3));
   expect(b.toUser().at(-1)).toStartWith('You have no approved');
 });
@@ -205,7 +205,7 @@ test('two open requests: soldier picks which one the MC is for', async () => {
   expect(q.text).toBe('Which request is this MC / Status for?');
   const opts = q.reply_markup.inline_keyboard.map(([k]) => k);
   expect(opts.map((k) => k.text)).toEqual([expect.stringMatching(/^🤒 .* sick request$/), expect.stringMatching(/^🏥 .* medical appointment 20\/10\/2026 1400$/)]);
-  await sendAll([tap(opts[1].callback_data), ...MC_FLOW.slice(3), photo()]);
+  await sendAll([tap(opts[1].callback_data), ...MC_FLOW.slice(3), photo(), SUBMIT]);
   const [, appt, mc] = posts(ADMINS[1]);
   expect(mc.text).toContain(`For: ${opts[1].text}`);
   expect(mc.reply_parameters.message_id).toBe(appt.result.message_id);
@@ -219,7 +219,7 @@ test('"Send MC / Status" under the approval starts a linked MC with only 4 quest
   expect(b.toUser().at(-1)).toMatch(/^For: 🤒 .* sick request\n\nWhat new status are you given/);
   await sendAll([text('Light duty'), tap('today')]);
   expect(JSON.parse(b.store.get('form:111')).start).toBe(day());
-  await sendAll([text('31/12/2099'), photo()]);
+  await sendAll([text('31/12/2099'), photo(), SUBMIT]);
   expect(posts(ADMINS[0]).at(-1).text).toContain(`PTE Tan Ah Kow\nFor: 🤒`);
   expect(posts(ADMINS[0]).at(-1).text).toContain(`From ${day()} to 31/12/2099`);
   await send(tap(mcfor)); // already used
@@ -246,9 +246,9 @@ test('second request offers the saved profile; Change re-asks rank and name', as
 });
 
 test('appointment flow sends summary + screenshot; approve updates copies and tells the soldier', async () => {
-  await sendAll([...APPT_FLOW.slice(0, -2), doc('application/pdf')]);
+  await sendAll([...APPT_FLOW.slice(0, -3), doc('application/pdf')]);
   expect(b.toUser().at(-1)).toContain('Please send an image');
-  await sendAll([photo(), tap('pledge:yes')]);
+  await sendAll([photo(), tap('pledge:yes'), SUBMIT]);
   for (const admin of ADMINS) {
     const [post, copy] = b.toAdmin(admin);
     expect(post.text).toContain('REQUEST TO ATTEND MEDICAL APPOINTMENT');
@@ -265,7 +265,7 @@ test('appointment flow sends summary + screenshot; approve updates copies and te
 
 test('/overview shows counts, who is waiting, and each status, for admins only', async () => {
   await approveSick(ADMINS[1]); // approved, then MC sent
-  await sendAll([...MC_FLOW, photo()]);
+  await sendAll([...MC_FLOW, photo(), SUBMIT]);
   await sendAll([text('/start'), tap('profile:yes'), ...SICK_FLOW.slice(3)]); // rejected
   await send(adminTap(ADMINS[0], keys(ADMINS[0])[1].callback_data));
   await send(adminText(ADMINS[0], 'secret medical reason'));
@@ -318,7 +318,7 @@ test.each([['PDF', () => doc('application/pdf')], ['photo', photo], ['image docu
   async (_, file) => {
     await approveSick();
     const f = file();
-    await sendAll([...MC_FLOW, f]);
+    await sendAll([...MC_FLOW, f, SUBMIT]);
     for (const admin of ADMINS) {
       const [post, copy] = b.toAdmin(admin).slice(-2);
       expect(post.text).toContain('MC / STATUS');
@@ -383,31 +383,52 @@ test('overlong answer is rejected', async () => {
 });
 
 test('a command as an answer is re-asked', async () => {
-  await sendAll([text('/start'), tap('rank:PTE'), text('/new')]);
+  await sendAll([text('/start'), tap('rank:PTE'), text('/help')]);
   expect(b.toUser().at(-1)).toContain('Commands are not valid answers');
   expect(JSON.parse(b.store.get('form:111')).step).toBe('name');
 });
 
-test('editing a typed answer updates it before submit', async () => {
-  const [name, clinic] = [SICK_FLOW[2], SICK_FLOW[5]];
-  await sendAll(SICK_FLOW.slice(0, 6));
-  await send(edit(name, 'Tan Ah Beng'));
-  expect(b.toUser().at(-1)).toContain('✔ Answer updated.');
-  await send(edit(clinic, '123')); // invalid: kept as before
-  expect(b.toUser().at(-1)).toContain('Edit not saved: Please describe it in words.');
-  expect(JSON.parse(b.store.get('form:111'))).toMatchObject({ step: 'time', name: 'Tan Ah Beng', clinic: 'Kranji Medical Centre' });
-  await sendAll(SICK_FLOW.slice(6));
-  expect(posts(ADMINS[0])[0].text).toContain('PTE Tan Ah Beng');
-  expect(JSON.parse(b.store.get('profile:111')).name).toBe('Tan Ah Beng');
+// Each typed step, reached through a real flow: [step, setup, bad answer, error]
+const reach = {
+  name: () => sendAll(SICK_FLOW.slice(0, 2)),
+  condition: () => sendAll(SICK_FLOW.slice(0, 4)),
+  clinic: () => sendAll(SICK_FLOW.slice(0, 5)),
+  time: () => sendAll(SICK_FLOW.slice(0, 6)),
+  purpose: () => sendAll(APPT_FLOW.slice(0, 4)),
+  when: () => sendAll(APPT_FLOW.slice(0, 5)),
+  venue: () => sendAll(APPT_FLOW.slice(0, 6)),
+  reason: async () => { await approveSick(); await sendAll(MC_FLOW.slice(0, 3)); },
+  start: async () => { await approveSick(); await sendAll(MC_FLOW.slice(0, 4)); },
+  end: async () => { await approveSick(); await sendAll(MC_FLOW.slice(0, 5)); },
+};
+test.each([
+  ['name', 'Tan123', 'letters only'],
+  ['name', '/overview', 'Commands are not valid answers'],
+  ['condition', '...', 'in words'],
+  ['clinic', '123', 'in words'],
+  ['time', '2500', 'Invalid time'],
+  ['purpose', '/cancelled', 'Commands are not valid answers'],
+  ['when', '20/10/2026', 'Invalid date/time'],
+  ['venue', '42', 'in words'],
+  ['reason', '!!!', 'in words'],
+  ['start', '2026-10-10', 'Invalid date'],
+  ['end', '09/10/2026', 'cannot be before'],
+])('bad %s answer %p is re-asked without advancing', async (step, answer, err) => {
+  await reach[step]();
+  const question = b.toUser().at(-1).split('\n\n').at(-1);
+  await send(text(answer));
+  expect(b.toUser().at(-1)).toContain(err);
+  expect(b.toUser().at(-1)).toEndWith(`\n\n${question}`);
+  expect(JSON.parse(b.store.get('form:111'))).toMatchObject({ step });
+  expect(JSON.parse(b.store.get('form:111'))[step]).toBeUndefined();
 });
 
-test('editing a message that is not a form answer is ignored', async () => {
-  const hello = text('hello');
-  await send(edit(hello, 'bye')); // no form
-  await sendAll([text('/start'), tap('rank:PTE')]);
-  const before = b.calls.length;
-  await send(edit(hello, 'bye')); // not an answer of this form
-  expect(b.calls.length).toBe(before);
+test.each(Object.keys(reach))('/start at the %s step restarts the form', async (step) => {
+  await reach[step]();
+  await send(text('/start'));
+  const fresh = JSON.parse(b.store.get('form:111'));
+  expect(fresh.step).toBe(step === 'reason' || step === 'start' || step === 'end' ? 'profile' : 'rank');
+  expect(fresh[step]).toBeUndefined();
 });
 
 test('non-text answer at a text step is re-asked', async () => {
@@ -435,9 +456,9 @@ test('all admins unreachable tells the user and allows retry', async () => {
   ADMINS.forEach((a) => b.failFor.add(a));
   await sendAll(SICK_FLOW);
   expect(b.toUser().at(-1)).toContain('Failed to send');
-  expect(JSON.parse(b.store.get('form:111')).step).toBe('ack');
+  expect(JSON.parse(b.store.get('form:111')).step).toBe('review');
   b.failFor.clear();
-  await send(tap('ack:yes'));
+  await send(SUBMIT);
   expect(b.toUser().at(-1)).toContain('Submitted');
 });
 
@@ -448,6 +469,159 @@ test('/cancel clears the form; next message restarts', async () => {
   expect(b.toUser().at(-1)).toContain('Cancelled');
   await send(text('hello'));
   expect(b.toUser().at(-1)).toContain('What is your Rank?');
+});
+
+test.each([['sick', SICK_FLOW, 'Medical Condition: Fever and sore throat'], ['appt', APPT_FLOW, 'Clinic: SGH Dermatology']])(
+  '%s flow: review shows the answers before anything reaches admins',
+  async (_, flow, line) => {
+    await sendAll(flow.slice(0, -1));
+    const q = lastToUser();
+    expect(q.text).toStartWith('Please check your details:\n\n');
+    expect(q.text).toContain('PTE Tan Ah Kow');
+    expect(q.text).toContain(line);
+    expect(q.reply_markup.inline_keyboard[0].map((k) => k.text)).toEqual(['✅ Submit', '🔄 Start over']);
+    expect(posts(ADMINS[0])).toHaveLength(0);
+  },
+);
+
+test('review Start over discards the answers; a stale Submit tap is ignored', async () => {
+  await sendAll(SICK_FLOW.slice(0, -1));
+  await send(tap('review:no'));
+  expect(b.toUser().at(-1)).toBe('What is your Rank?');
+  expect(JSON.parse(b.store.get('form:111'))).toEqual({ step: 'rank', ids: expect.any(Array) });
+  await send(SUBMIT); // old review keyboard
+  expect(posts(ADMINS[0])).toHaveLength(0);
+  await sendAll(SICK_FLOW.slice(1));
+  expect(posts(ADMINS[0])).toHaveLength(1);
+  // the first attempt's messages are cleaned up too
+  expect(b.calls.find((c) => c.method === 'deleteMessages').message_ids).toContain(SICK_FLOW[0].message.message_id);
+});
+
+test('double tap on Submit sends once and starts nothing', async () => {
+  await sendAll([...SICK_FLOW, SUBMIT]);
+  expect(posts(ADMINS[0])).toHaveLength(1);
+  expect(b.toUser().at(-1)).toEndWith('Submitted ✅');
+  expect(b.store.has('form:111')).toBe(false);
+});
+
+test('/new restarts mid-form like /start', async () => {
+  await sendAll(SICK_FLOW.slice(0, 5));
+  await send(text('/new'));
+  expect(b.toUser().at(-1)).toBe('What is your Rank?');
+  expect(JSON.parse(b.store.get('form:111')).step).toBe('rank');
+});
+
+test('edited messages are ignored', async () => {
+  await sendAll(SICK_FLOW.slice(0, 3));
+  const before = b.calls.length;
+  await send({ update_id: 0, edited_message: { ...SICK_FLOW[2].message, text: 'Tan Ah Beng' } });
+  expect(b.calls.length).toBe(before);
+  expect(JSON.parse(b.store.get('form:111')).name).toBe('Tan Ah Kow');
+});
+
+test('answers are trimmed; blank answers are re-asked', async () => {
+  await sendAll([text('/start'), tap('rank:PTE'), text('   ')]);
+  expect(b.toUser().at(-1)).toBe('Please type your answer.\n\nWhat is your Name?');
+  await send(text('  Tan Ah Kow  '));
+  expect(JSON.parse(b.store.get('form:111'))).toMatchObject({ step: 'type', name: 'Tan Ah Kow' });
+});
+
+// [step, setup, wrong kind of input, reply prefix]
+test.each([
+  ['rank', () => send(text('/start')), photo, 'Please tap one of the buttons.'],
+  ['type', () => sendAll(SICK_FLOW.slice(0, 3)), () => text('sick'), 'Please tap one of the buttons.'],
+  ['ack', () => sendAll(SICK_FLOW.slice(0, 7)), () => text('ok'), 'Please tap one of the buttons.'],
+  ['shot', () => sendAll(APPT_FLOW.slice(0, 7)), () => text('attached'), 'Please send an image.'],
+  ['shot', () => sendAll(APPT_FLOW.slice(0, 7)), () => doc('application/pdf'), 'Please send an image.'],
+  ['review', () => sendAll(SICK_FLOW.slice(0, -1)), () => text('yes'), 'Please tap one of the buttons.'],
+])('wrong input at the %s step is re-asked', async (step, setup, input, err) => {
+  await setup();
+  await send(input());
+  expect(b.toUser().at(-1)).toStartWith(`${err}\n\n`);
+  expect(JSON.parse(b.store.get('form:111')).step).toBe(step);
+});
+
+test.each(['today', 'rank:PTE', 'review:yes', 'link:bogus', 'profile:yes', 'unknown'])(
+  'stray tap %p at the name step is ignored',
+  async (data) => {
+    await sendAll(SICK_FLOW.slice(0, 2));
+    const before = b.calls.length;
+    await send(tap(data));
+    expect(b.calls.slice(before).map((c) => c.method)).toEqual(['answerCallbackQuery']);
+    expect(JSON.parse(b.store.get('form:111')).step).toBe('name');
+  },
+);
+
+test('soldier without a username is identified by user id', async () => {
+  const cq = SUBMIT.callback_query;
+  await sendAll([...SICK_FLOW.slice(0, -1), { update_id: 0, callback_query: { ...cq, from: { id: USER.id } } }]);
+  expect(posts(ADMINS[0])[0].text).toEndWith('Sent by: user id 111');
+});
+
+test('a caption on the MC file is forwarded to admins', async () => {
+  await approveSick();
+  const f = photo();
+  f.message.caption = 'Page 1 of 1';
+  await sendAll([...MC_FLOW, f, SUBMIT]);
+  expect(b.toAdmin(ADMINS[0]).findLast((c) => c.method === 'copyMessage').caption).toBe('[For Admin] Page 1 of 1');
+});
+
+test('"Send MC / Status" mid-form replaces that form; an unknown id is refused', async () => {
+  await approveSick();
+  const mcfor = lastToUser().reply_markup.inline_keyboard[0][0].callback_data;
+  await sendAll([text('/start'), tap('profile:yes'), tap('type:sick')]);
+  await send(tap(mcfor));
+  expect(JSON.parse(b.store.get('form:111'))).toMatchObject({ step: 'reason', type: 'mc' });
+  await send(tap('mcfor:bogus'));
+  expect(b.toUser().at(-1)).toBe('This request already has an MC / Status, or it has expired.');
+});
+
+test.each([['Approve', 0], ['Reject', 1]])('%s on an expired request does nothing', async (_, i) => {
+  await sendAll(SICK_FLOW);
+  const data = keys(ADMINS[0])[i].callback_data;
+  b.store.delete(`sub:${data.split(':')[1]}`);
+  const before = b.calls.length;
+  await send(adminTap(ADMINS[0], data));
+  expect(b.calls.slice(before).map((c) => c.method)).toEqual(['answerCallbackQuery']);
+});
+
+test('reject reason typed after the request expired', async () => {
+  await sendAll(SICK_FLOW);
+  const reject = keys(ADMINS[0])[1].callback_data;
+  await send(adminTap(ADMINS[0], reject));
+  b.store.delete(`sub:${reject.slice(7)}`);
+  await send(adminText(ADMINS[0], 'See MO'));
+  expect(edits().at(-1).text).toBe('[For Admin] This request has expired.');
+  expect(b.store.has(`rej:${ADMINS[0]}`)).toBe(false);
+});
+
+test('overlong reject reason is refused and the reject stays pending', async () => {
+  await sendAll(SICK_FLOW);
+  await send(adminTap(ADMINS[0], keys(ADMINS[0])[1].callback_data));
+  await send(adminText(ADMINS[0], 'x'.repeat(501)));
+  expect(b.toAdmin(ADMINS[0]).at(-1).text).toBe('[For Admin] Too long, please keep it under 500 characters.');
+  expect(b.store.has(`rej:${ADMINS[0]}`)).toBe(true);
+  await send(adminText(ADMINS[0], 'See MO'));
+  expect(lastToUser().text).toContain('Reason: See MO');
+});
+
+test('admin sending /start drops their pending reject', async () => {
+  await sendAll(SICK_FLOW);
+  await send(adminTap(ADMINS[0], keys(ADMINS[0])[1].callback_data));
+  await send(adminText(ADMINS[0], '/start'));
+  expect(b.store.has(`rej:${ADMINS[0]}`)).toBe(false);
+  expect(b.toAdmin(ADMINS[0]).at(-1).text).toBe('What is your Rank?');
+  expect(b.userEdit()).toBeUndefined(); // request still undecided
+});
+
+test('/overview on a day with no submissions', async () => {
+  await send(adminText(ADMINS[0], '/overview'));
+  expect(b.toAdmin(ADMINS[0]).at(-1).text).toBe([
+    `[For Admin] Overview for ${day()}`, '',
+    '🤒 Report sick: 0', '🏥 Medical appointment: 0', '📄 MC / Status: 0', '',
+    '⏳ Waiting\nNone', '', '📄 Awaiting MC\nNone', '',
+    '🤒 Report sick\nNone', '', '🏥 Medical appointment\nNone', '', '📄 MC / Status\nNone',
+  ].join('\n'));
 });
 
 test('backend errors still return 200', async () => {

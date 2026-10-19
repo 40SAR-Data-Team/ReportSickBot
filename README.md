@@ -35,9 +35,9 @@ If `ADMINS` already exists, run `vercel env rm ADMINS production` first.
 
 ## Use
 
-DM the bot `/start`. Send `/cancel` to abort. Unfinished forms expire after 1 hour.
+DM the bot `/start` (or `/new`). Either one restarts the form at any step. Send `/cancel` to abort. Unfinished forms expire after 1 hour.
 
-To fix a typed answer before submitting, edit your message in Telegram. Button choices can't be edited; send /start to redo.
+Before submitting, the bot shows all the answers with **Submit** / **Start over** buttons. Edited messages are ignored; to change an answer, tap Start over.
 
 There are three workflows: report sick, attend a medical appointment (with a screenshot), and send an MC / status (with a photo or PDF).
 
@@ -71,7 +71,7 @@ Telegram doesn't let bots delete messages older than 48 hours, so those stay.
 
 Run `bun test`. All tests use dummy data and never touch the real Telegram or Upstash.
 
-- `tests/unit.test.js`: date parsing.
+- `tests/unit.test.js`: date parsing and answer validation.
 - `tests/integration.test.js`: calls the handler directly, with `fetch` mocked to an in-memory fake.
 - `tests/e2e.test.js`: posts over real HTTP to the webhook. Telegram and Upstash are replaced by a local dummy server.
 

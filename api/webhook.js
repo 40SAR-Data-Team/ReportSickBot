@@ -36,14 +36,16 @@ const QUESTIONS = {
   start: () => ['Start Date of MC / Status? (DD/MM/YYYY)', [[btn(`Today (${today()})`, 'today')]]],
   end: ['End Date of MC / Status? (DD/MM/YYYY)'],
   file: ['Attach your MC / Memo. (one photo or PDF)'],
+  review: (s) => [`Please check your details:\n\n${details(s).join('\n')}`,
+    [[btn('✅ Submit', 'review:yes'), btn('🔄 Start over', 'review:no')]]],
 };
 // rank -> name -> type, then the chosen type's steps; after the last step, submit.
 const FLOWS = {
-  sick: ['condition', 'clinic', 'time', 'ack'],
-  appt: ['purpose', 'when', 'venue', 'shot', 'pledge'],
-  mc: ['link', 'reason', 'start', 'end', 'file'],
+  sick: ['condition', 'clinic', 'time', 'ack', 'review'],
+  appt: ['purpose', 'when', 'venue', 'shot', 'pledge', 'review'],
+  mc: ['link', 'reason', 'start', 'end', 'file', 'review'],
 };
-const BUTTON_STEPS = new Set(['profile', 'rank', 'type', 'ack', 'pledge', 'link']);
+const BUTTON_STEPS = new Set(['profile', 'rank', 'type', 'ack', 'pledge', 'link', 'review']);
 
 /** Parses "DD/MM/YYYY" (or "DD/MM/YYYY HHMM" if withTime); returns a Date or null if invalid. */
 export function parseDateTime(text, withTime) {
@@ -137,14 +139,20 @@ function buttons(sub, f) {
   return f.decided ? [] : [btn('✅ Approve', `approve:${sub.id}`), btn('❌ Reject', `reject:${sub.id}`)];
 }
 
-/** Sends the summary (and attached file) to every admin; returns the submission, or null if no admin received it. */
-async function submit(chat, s, from) {
+/** Summary lines of a filled form, shown for review and sent to admins. */
+function details(s) {
   const who = `${s.rank} ${s.name}`;
-  const lines = {
+  return {
     sick: ['🤒 REQUEST TO REPORT SICK', who, `Medical Condition: ${s.condition}`, `Clinic: ${s.clinic}`, `Time: ${s.time}`, `✅ ${ACK}`],
     appt: ['🏥 REQUEST TO ATTEND MEDICAL APPOINTMENT', who, `Reason: ${s.purpose}`, `Time: ${s.when}`, `Clinic: ${s.venue}`, `✅ ${PLEDGE}`],
     mc: ['📄 MC / STATUS', who, `For: ${s.grant?.label}`, `Reason / Status: ${s.reason}`, `From ${s.start} to ${s.end}`],
   }[s.type];
+}
+
+/** Sends the summary (and attached file) to every admin; returns the submission, or null if no admin received it. */
+async function submit(chat, s, from) {
+  const who = `${s.rank} ${s.name}`;
+  const lines = details(s);
   lines.push(`Sent by: ${from.username ? `@${from.username}` : `user id ${from.id}`}`);
   const kind = { sick: 'sick request', appt: `medical appointment ${s.when}`, mc: `MC ${s.start} to ${s.end}` }[s.type];
   const sub = { id: crypto.randomUUID(), user: chat, type: s.type, text: lines.join('\n'), label: `${who}, ${kind}`, kind, rank: s.rank, name: s.name, when: s.when };
@@ -294,24 +302,18 @@ async function decide(cb, name) {
   return apply(id, action, name, action === 'seen' ? `👍 Acknowledged by ${name}` : `✅ Added to BatSys by ${name}`);
 }
 
+/** A new form: offers the saved profile, or asks the rank. */
+async function blank(chat) {
+  const profile = await json('GET', `profile:${chat}`);
+  return profile ? { step: 'profile', ...profile } : { step: 'rank' };
+}
+
 async function handle(update) {
   const cb = update.callback_query;
-  const msg = update.message ?? update.edited_message ?? cb?.message;
+  const msg = update.message ?? cb?.message;
   if (msg?.chat.type !== 'private') return;
   const chat = msg.chat.id;
   const key = `form:${chat}`;
-  const edit = update.edited_message;
-  if (edit) {
-    // soldier edited a typed answer: re-validate it, then re-ask the current step
-    const s = await json('GET', key);
-    const step = s?.answers?.[edit.message_id];
-    if (!step || !edit.text) return;
-    const t = edit.text.trim();
-    const err = invalid(step, t, s);
-    if (!err) s[step] = step === 'time' ? `${today()} ${t}` : t;
-    s.ids.push((await ask(chat, s.step, err ? `Edit not saved: ${err}` : '✔ Answer updated.', s)).message_id);
-    return redis('SET', key, JSON.stringify(s), 'EX', 3600);
-  }
   let text = update.message?.text?.trim();
   const admin = adminName((update.message ?? cb).from.id);
   if (cb) await tg('answerCallbackQuery', { callback_query_id: cb.id });
@@ -319,6 +321,7 @@ async function handle(update) {
   if (admin && text === '/overview') return overview(chat);
   if (admin && text && !text.startsWith('/') && await finishReject(chat, admin, text)) return;
 
+  if (text === '/new') text = '/start';
   if (text === '/start' || text === '/cancel') {
     await redis('DEL', key, `rej:${chat}`);
     if (text === '/cancel') return tg('sendMessage', { chat_id: chat, text: 'Cancelled. Send /start to begin again.' });
@@ -333,17 +336,14 @@ async function handle(update) {
   }
   const fresh = !s;
   if (mcfor) s = { step: 'reason', type: 'mc', ...linkTo(mcfor) };
-  else if (!s) {
-    const profile = await json('GET', `profile:${chat}`);
-    s = profile ? { step: 'profile', ...profile } : { step: 'rank' };
-  }
+  else if (!s) s = await blank(chat);
   // Every message in the form (both sides) is tracked, then deleted on submit.
   s.ids ??= [];
   if (update.message) s.ids.push(update.message.message_id);
   const save = () => redis('SET', key, JSON.stringify(s), 'EX', 3600);
   const reply = async (step, prefix) => { s.ids.push((await ask(chat, step, prefix, s)).message_id); return save(); };
   if (mcfor) return reply('reason', `For: ${s.grant.label}`);
-  if (fresh) return reply(s.step);
+  if (fresh) return cb ? undefined : reply(s.step); // tap on a submitted / expired form: ignore
   if (cb?.data === 'today' && s.step === 'start') text = today();
 
   let value;
@@ -353,8 +353,16 @@ async function handle(update) {
     const picked = step === 'link' && s.grants.find(([id]) => id === v);
     if (step === 'link' && !picked) return;
     value = v;
-    const label = { type: TYPES[v], ack: 'Acknowledged', pledge: 'Acknowledged', profile: v === 'yes' ? 'Yes' : 'Change', link: picked && picked[1].label }[step] ?? v;
+    const label = {
+      type: TYPES[v], ack: 'Acknowledged', pledge: 'Acknowledged', profile: v === 'yes' ? 'Yes' : 'Change',
+      link: picked && picked[1].label, review: v === 'yes' ? 'Submit' : 'Start over',
+    }[step] ?? v;
     await tg('editMessageText', { chat_id: chat, message_id: cb.message.message_id, text: `${cb.message.text}\n\n✔ ${label}` });
+    if (step === 'review' && v === 'no') {
+      // new form, but keep the old messages so the submit cleanup removes them too
+      s = { ...(await blank(chat)), ids: s.ids };
+      return reply(s.step);
+    }
   } else if (cb && !text) {
     return; // stale tap on an old keyboard
   } else if (s.step === 'file' || s.step === 'shot') {
@@ -367,7 +375,6 @@ async function handle(update) {
   } else {
     const err = invalid(s.step, text, s);
     if (err) return reply(s.step, err);
-    if (update.message) (s.answers ??= {})[update.message.message_id] = s.step; // lets an edit find its step
     value = s.step === 'time' ? `${today()} ${text}` : text;
   }
 
