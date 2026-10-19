@@ -35,10 +35,6 @@ export function fakeBackend() {
     if (cmd === 'GET') return { result: b.store.get(key) ?? null };
     if (cmd === 'SET') return b.store.set(key, val), { result: 'OK' };
     if (cmd === 'DEL') return { result: body.slice(1).filter((k) => b.store.delete(k)).length };
-    if (cmd === 'GETDEL') {
-      const v = b.store.get(key) ?? null;
-      return b.store.delete(key), { result: v };
-    }
     return { error: `unknown command ${cmd}` };
   };
   b.toAdmin = (admin) => b.calls.filter((c) => c.chat_id === admin);
@@ -73,7 +69,7 @@ export const groupText =(t) => ({ update_id: ++id, message: { message_id: ++id, 
 
 export const SICK_FLOW = [text('/start'), tap('rank:PTE'), text('Tan Ah Kow'), tap('type:sick'),
   text('Fever and sore throat'), text('Kranji Medical Centre'), text('0830'), tap('ack:yes'), tap('review:yes')];
-/** MC after an approved request: the profile saved by that request is reused, and its one grant auto-links. Add the file, then `SUBMIT`. */
+/** MC after an earlier request: its saved profile is reused. With an open grant, a link tap goes after the first 3. Add the file, then `SUBMIT`. */
 export const MC_FLOW = [text('/start'), tap('profile:yes'), tap('type:mc'),
   text('Sprained ankle, light duty'), text('10/10/2026'), text('12/10/2026')];
 export const SUBMIT = tap('review:yes');
