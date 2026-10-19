@@ -55,6 +55,25 @@ export function parseDateTime(text, withTime) {
   return valid ? date : null;
 }
 
+const WORDS = new Set(['condition', 'clinic', 'purpose', 'venue', 'reason']);
+/** Error message for a typed answer at `step` of form `s`, or null if valid. */
+export function invalid(step, text, s) {
+  if (!text) return 'Please type your answer.';
+  if (text.startsWith('/')) return 'Commands are not valid answers. Send /start to restart, or /cancel to stop.';
+  // keeps the admin summary under Telegram's 4096-char message limit
+  if (text.length > 500) return 'Too long, please keep it under 500 characters.';
+  if (step === 'name' && !/^[A-Za-z][A-Za-z .'\/@-]{0,59}$/.test(text)) return 'Please type your name in letters only (e.g. Tan Ah Kow).';
+  if (WORDS.has(step) && !/[A-Za-z]/.test(text)) return 'Please describe it in words.';
+  if (step === 'time' && !parseDateTime(`${today()} ${text}`, true)) return 'Invalid time.';
+  if (step === 'when' && !parseDateTime(text, true)) return 'Invalid date/time.';
+  if (step !== 'start' && step !== 'end') return null;
+  const date = parseDateTime(text, false);
+  if (!date) return 'Invalid date.';
+  if (step === 'end' && date < parseDateTime(s.start, false)) return 'End date cannot be before the start date.';
+  if (step === 'start' && s.end && date > parseDateTime(s.end, false)) return 'Start date cannot be after the end date.';
+  return null;
+}
+
 async function tg(method, body) {
   const api = process.env.TELEGRAM_API ?? 'https://api.telegram.org'; // overridden only by e2e tests
   const r = await fetch(`${api}/bot${process.env.BOT_TOKEN}/${method}`, {
@@ -277,10 +296,22 @@ async function decide(cb, name) {
 
 async function handle(update) {
   const cb = update.callback_query;
-  const msg = update.message ?? cb?.message;
+  const msg = update.message ?? update.edited_message ?? cb?.message;
   if (msg?.chat.type !== 'private') return;
   const chat = msg.chat.id;
   const key = `form:${chat}`;
+  const edit = update.edited_message;
+  if (edit) {
+    // soldier edited a typed answer: re-validate it, then re-ask the current step
+    const s = await json('GET', key);
+    const step = s?.answers?.[edit.message_id];
+    if (!step || !edit.text) return;
+    const t = edit.text.trim();
+    const err = invalid(step, t, s);
+    if (!err) s[step] = step === 'time' ? `${today()} ${t}` : t;
+    s.ids.push((await ask(chat, s.step, err ? `Edit not saved: ${err}` : '✔ Answer updated.', s)).message_id);
+    return redis('SET', key, JSON.stringify(s), 'EX', 3600);
+  }
   let text = update.message?.text?.trim();
   const admin = adminName((update.message ?? cb).from.id);
   if (cb) await tg('answerCallbackQuery', { callback_query_id: cb.id });
@@ -334,15 +365,9 @@ async function handle(update) {
     value = m.message_id;
     s.caption = m.caption;
   } else {
-    if (!text) return reply(s.step, 'Please type your answer.');
-    // keeps the admin summary under Telegram's 4096-char message limit
-    if (text.length > 500) return reply(s.step, 'Too long, please keep it under 500 characters.');
-    if (s.step === 'time' && !parseDateTime(`${today()} ${text}`, true)) return reply('time', 'Invalid time.');
-    if (s.step === 'when' && !parseDateTime(text, true)) return reply('when', 'Invalid date/time.');
-    if ((s.step === 'start' || s.step === 'end') && !parseDateTime(text, false)) return reply(s.step, 'Invalid date.');
-    if (s.step === 'end' && parseDateTime(text, false) < parseDateTime(s.start, false)) {
-      return reply('end', 'End date cannot be before the start date.');
-    }
+    const err = invalid(s.step, text, s);
+    if (err) return reply(s.step, err);
+    if (update.message) (s.answers ??= {})[update.message.message_id] = s.step; // lets an edit find its step
     value = s.step === 'time' ? `${today()} ${text}` : text;
   }
 

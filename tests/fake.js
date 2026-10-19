@@ -69,6 +69,8 @@ export const adminText = (admin, t) => ({
   update_id: ++id,
   message: { message_id: ++id, chat: { id: admin, type: 'private' }, from: { id: admin }, text: t },
 });
+/** `orig` (a text() update) edited to `t`. */
+export const edit = (orig, t) => ({ update_id: ++id, edited_message: { ...orig.message, text: t } });
 export const groupText =(t) => ({ update_id: ++id, message: { message_id: ++id, chat: { id: -1, type: 'group' }, from: USER, text: t } });
 
 export const SICK_FLOW = [text('/start'), tap('rank:PTE'), text('Tan Ah Kow'), tap('type:sick'),
