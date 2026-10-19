@@ -54,7 +54,7 @@ Every message to admins starts with `[For Admin]`. Each admin's copy has buttons
 
 A tap appends the outcome to every admin's copy and to the soldier's summary. It also sends the soldier a reply, so they get a notification. Attached files stay. Buttons stop working after 7 days.
 
-An MC / status must follow an approved sick or appointment request that has no MC yet. The approval reply has a **Send MC / Status** button that starts an MC already linked to that request. Through /start, the bot links the open request itself, or asks which one if there are several. With no open request, the MC is blocked. The MC summary appears as a reply to the request's summary, for both the soldier and the admins. Each request takes one MC. A sick request stays open for 7 days, an appointment until 7 days after the appointment.
+An MC / status can be sent without a prior request, for soldiers who reported sick without the bot. It can also be linked to an approved sick or appointment request that has no MC yet. The approval reply has a **Send MC / Status** button that starts an MC already linked to that request. Through /start, if there are open requests, the bot asks which one the MC is for, or **Not for any request above**. A linked MC summary appears as a reply to the request's summary, for both the soldier and the admins. Each request takes one MC. A sick request stays open for 7 days, an appointment until 7 days after the appointment.
 
 Admins can send `/overview` for today (Singapore time). It shows counts per type, who is still waiting for a decision or an acknowledgement, approved requests with no MC yet, and each submission's status. It shows names only, no medical details or reject reasons.
 
