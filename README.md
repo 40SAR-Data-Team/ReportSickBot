@@ -37,6 +37,8 @@ If `ADMINS` already exists, run `vercel env rm ADMINS production` first.
 
 DM the bot `/start`. Send `/cancel` to abort. Unfinished forms expire after 1 hour.
 
+To fix a typed answer before submitting, edit your message in Telegram. Button choices can't be edited; send /start to redo.
+
 There are three workflows: report sick, attend a medical appointment (with a screenshot), and send an MC / status (with a photo or PDF).
 
 The soldier's chat moves through three stages. Each stage replaces the one before it:

@@ -1,7 +1,7 @@
 // Calls the handler directly with fetch mocked to the dummy backend.
 import { afterAll, beforeEach, expect, test } from 'bun:test';
 import handler from '../api/webhook.js';
-import { ADMINS, APPT_FLOW, ENV, MC_FLOW, SICK_FLOW, USER, adminTap, adminText, doc, fakeBackend, groupText, photo, tap, text } from './fake.js';
+import { ADMINS, APPT_FLOW, ENV, MC_FLOW, SICK_FLOW, USER, adminTap, adminText, doc, edit, fakeBackend, groupText, photo, tap, text } from './fake.js';
 
 const realFetch = globalThis.fetch;
 let b;
@@ -380,6 +380,34 @@ test('overlong answer is rejected', async () => {
   await sendAll([text('/start'), tap('rank:PTE'), text('x'.repeat(501))]);
   expect(b.toUser().at(-1)).toContain('under 500 characters');
   expect(JSON.parse(b.store.get('form:111')).step).toBe('name');
+});
+
+test('a command as an answer is re-asked', async () => {
+  await sendAll([text('/start'), tap('rank:PTE'), text('/new')]);
+  expect(b.toUser().at(-1)).toContain('Commands are not valid answers');
+  expect(JSON.parse(b.store.get('form:111')).step).toBe('name');
+});
+
+test('editing a typed answer updates it before submit', async () => {
+  const [name, clinic] = [SICK_FLOW[2], SICK_FLOW[5]];
+  await sendAll(SICK_FLOW.slice(0, 6));
+  await send(edit(name, 'Tan Ah Beng'));
+  expect(b.toUser().at(-1)).toContain('✔ Answer updated.');
+  await send(edit(clinic, '123')); // invalid: kept as before
+  expect(b.toUser().at(-1)).toContain('Edit not saved: Please describe it in words.');
+  expect(JSON.parse(b.store.get('form:111'))).toMatchObject({ step: 'time', name: 'Tan Ah Beng', clinic: 'Kranji Medical Centre' });
+  await sendAll(SICK_FLOW.slice(6));
+  expect(posts(ADMINS[0])[0].text).toContain('PTE Tan Ah Beng');
+  expect(JSON.parse(b.store.get('profile:111')).name).toBe('Tan Ah Beng');
+});
+
+test('editing a message that is not a form answer is ignored', async () => {
+  const hello = text('hello');
+  await send(edit(hello, 'bye')); // no form
+  await sendAll([text('/start'), tap('rank:PTE')]);
+  const before = b.calls.length;
+  await send(edit(hello, 'bye')); // not an answer of this form
+  expect(b.calls.length).toBe(before);
 });
 
 test('non-text answer at a text step is re-asked', async () => {
