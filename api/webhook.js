@@ -123,13 +123,13 @@ async function grants(chat) {
 }
 const linkTo = ([id, g]) => ({ link: id, grant: g, rank: g.rank, name: g.name });
 
-/** Outcome lines of a submission, from its claimed fields. */
-function outcome(f) {
+/** Outcome lines of a submission, from its claimed fields. The soldier's copy leaves out the BatSys tick. */
+function outcome(f, soldier) {
   const d = f.decided && JSON.parse(f.decided);
   return [
     d && (d.v === 'approved' ? `✅ ${d.by} has approved` : `❌ Rejected by ${d.by}${d.reason ? `\nReason: ${d.reason}` : ''}`),
     f.seen && `👍 Acknowledged by ${f.seen}`,
-    f.batsys && `✅ Added to BatSys by ${f.batsys}`,
+    !soldier && f.batsys && `✅ Added to BatSys by ${f.batsys}`,
   ].filter(Boolean);
 }
 
@@ -218,7 +218,8 @@ async function overview(chat) {
 
 /**
  * First tap wins: claims `field` on the submission, then refreshes every admin copy and the soldier's summary,
- * and replies `notify` to the soldier (a new message push-notifies; edits don't). Returns the sub, or null if taken / expired.
+ * and replies `notify` to the soldier (a new message push-notifies; edits don't). No `notify`: the soldier's chat is left alone.
+ * Returns the sub, or null if taken / expired.
  */
 async function apply(id, field, value, notify, markup) {
   const key = `sub:${id}`;
@@ -229,10 +230,13 @@ async function apply(id, field, value, notify, markup) {
   const body = `${sub.text}\n\n${outcome(f).join('\n')}`;
   const open = buttons(sub, f);
   const reply_markup = open.length ? { inline_keyboard: [open] } : undefined; // omitted: keyboard removed
+  const soldier = notify ? [
+    tg('editMessageText', { chat_id: sub.user, message_id: sub.summary, text: `${sub.text}\n\n${outcome(f, true).join('\n')}` }),
+    tg('sendMessage', { chat_id: sub.user, text: notify, reply_to_message_id: sub.summary, reply_markup: markup }),
+  ] : [];
   const results = await Promise.allSettled([
     ...sub.msgs.map(([chat_id, message_id]) => tg('editMessageText', { chat_id, message_id, text: `${FOR_ADMIN} ${body}`, reply_markup })),
-    tg('editMessageText', { chat_id: sub.user, message_id: sub.summary, text: body }),
-    tg('sendMessage', { chat_id: sub.user, text: notify, reply_to_message_id: sub.summary, reply_markup: markup }),
+    ...soldier,
     log(sub, f),
   ]);
   results.forEach((r) => r.status === 'rejected' && console.error('apply:', r.reason));
@@ -299,7 +303,7 @@ async function decide(cb, name) {
       { inline_keyboard: [[btn('📄 Send MC / Status', `mcfor:${id}`)]] });
     return sub && grant(sub);
   }
-  return apply(id, action, name, action === 'seen' ? `👍 Acknowledged by ${name}` : `✅ Added to BatSys by ${name}`);
+  return apply(id, action, name, action === 'seen' && `👍 Acknowledged by ${name}`);
 }
 
 /** A new form: offers the saved profile, or asks the rank. */

@@ -173,13 +173,24 @@ test('MC threads under the approved request, then acknowledge and BatSys tick in
     expect(e.reply_markup).toBeUndefined();
   }
   expect(b.userEdit()).toContain('Reason / Status: Sprained ankle');
-  expect(b.userEdit()).toEndWith('\n\n👍 Acknowledged by Admin B\n✅ Added to BatSys by Admin A');
-  expect(lastToUser().text).toBe('✅ Added to BatSys by Admin A');
+  expect(b.userEdit()).toEndWith('\n\n👍 Acknowledged by Admin B');
+  expect(b.calls.slice(before).filter((c) => c.chat_id === USER.id)).toHaveLength(0); // BatSys is admin-only
   expect(b.calls.filter((c) => c.method === 'deleteMessage' && ADMINS.includes(c.chat_id))).toHaveLength(0); // file copies kept
 
   before = b.calls.length;
   await send(adminTap(ADMINS[0], seen.callback_data)); // already acknowledged
   expect(b.calls.slice(before).map((c) => c.method)).toEqual(['answerCallbackQuery']);
+});
+
+test('BatSys before acknowledge: the soldier never sees the BatSys tick', async () => {
+  await approveSick();
+  await sendAll([...MC_FLOW, photo(), SUBMIT]);
+  const [seen, batsys] = keys(ADMINS[0]);
+  await send(adminTap(ADMINS[0], batsys.callback_data));
+  await send(adminTap(ADMINS[1], seen.callback_data));
+  expect(edits().at(-1).text).toEndWith('\n\n👍 Acknowledged by Admin B\n✅ Added to BatSys by Admin A');
+  expect(b.userEdit()).toEndWith('\n\n👍 Acknowledged by Admin B');
+  expect(b.userEdit()).not.toContain('BatSys');
 });
 
 test('MC without an approved request is blocked', async () => {
