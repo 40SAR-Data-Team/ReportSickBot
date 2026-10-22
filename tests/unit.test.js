@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { invalid, parseDateTime } from '../api/webhook.js';
+import { APPT_DAY } from './fake.js';
 
 test('parseDateTime', () => {
   expect(parseDateTime('10/10/2026 0830', true)).toEqual(new Date(Date.UTC(2026, 9, 10, 8, 30)));
@@ -32,7 +33,7 @@ test.each([
 // [step, answer, form state, expected error substring, or null if valid]
 test.each([
   ['name', '', {}, 'type your answer'],
-  ['name', '/new', {}, 'Commands'],
+  ['name', '/start', {}, 'Commands'],
   ['condition', '/start fever', {}, 'Commands'],
   ['clinic', 'x'.repeat(501), {}, 'under 500'],
   ['condition', 'x'.repeat(500), {}, null],
@@ -50,13 +51,21 @@ test.each([
   ['clinic', 'Kranji Medical Centre', {}, null],
   ['purpose', '???', {}, 'in words'],
   ['venue', '42', {}, 'in words'],
+  ['formsg', '6ad8500b1d0ae72f026cfa75', {}, null],
+  ['formsg', '6AD8500B1D0AE72F026CFA75', {}, null],
+  ['formsg', '6ad8500b1d0ae72f026cfa7', {}, 'Invalid Response ID'],
+  ['formsg', 'zad8500b1d0ae72f026cfa75', {}, 'Invalid Response ID'],
   ['reason', 'LD 2 days', {}, null],
   ['time', '0830', {}, null],
   ['time', '08:30', {}, null],
   ['time', '2500', {}, 'Invalid time'],
   ['time', 'tomorrow', {}, 'Invalid time'],
-  ['when', '20/10/2026 1400', {}, null],
-  ['when', '20/10/2026', {}, 'Invalid date/time'],
+  ['when', `${APPT_DAY} 1400`, {}, null],
+  ['when', APPT_DAY, {}, 'Invalid date/time'],
+  ['when', '01/01/2020 1400', {}, 'in the past'],
+  ['when', '01/01/2099 1400', {}, 'too far ahead'],
+  ['start', '01/01/2099', {}, 'too far from today'],
+  ['end', APPT_DAY, { start: '01/01/2000' }, 'longer than a year'],
   ['start', '10/10/2026', {}, null],
   ['start', '10/10/2026 0830', {}, 'Invalid date'],
   ['start', '13/10/2026', { end: '12/10/2026' }, 'after the end'],

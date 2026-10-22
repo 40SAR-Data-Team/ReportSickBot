@@ -35,7 +35,7 @@ If `ADMINS` already exists, run `vercel env rm ADMINS production` first.
 
 ## Use
 
-DM the bot `/start` (or `/new`). Either one restarts the form at any step. Send `/cancel` to abort. Unfinished forms expire after 1 hour.
+DM the bot `/start`. It restarts the form at any step. Send `/cancel` to abort. Unfinished forms expire after 1 hour.
 
 Before submitting, the bot shows all the answers with **Submit** / **Start over** buttons. Edited messages are ignored; to change an answer, tap Start over.
 
@@ -44,13 +44,13 @@ There are three workflows: report sick, attend a medical appointment (with a scr
 The soldier's chat moves through three stages. Each stage replaces the one before it:
 1. The questions and answers.
 2. One summary message, sent on submit.
-3. The commander's outcome: the summary plus "✅ <admin> has approved" (sick or appointment) or "👍 Acknowledged by <admin>" (MC).
+3. The commander's outcome: the summary plus "✅ Approved by <admin>" (sick or appointment) or "👍 Acknowledged by <admin>" (MC).
 
 After the first submission, the bot remembers the soldier's rank and name and asks "Continue as PTE Tan?" next time.
 
 Every message to admins starts with `[For Admin]`. Each admin's copy has buttons:
-- Sick request or appointment: **Approve** / **Reject**. Reject asks the admin for an optional reason (type it, or tap Skip). The soldier gets the reason and is told to send /start for a new request. The first decision wins. If another admin approves while you type, your prompt says "Already approved by <admin>".
-- MC: **Acknowledge** / **Added to BatSys?**. Each button works on its own and can be tapped by a different admin. Only admins see the BatSys tick; the soldier is not told.
+- Sick request or appointment: **Approve** / **Reject**; after an approval, **Added to BatSys?**. Reject asks the admin for an optional reason (type it, or tap Skip). The soldier gets the reason and is told to send /start for a new request. The first decision wins. If another admin approves while you type, your prompt says "Already approved by <admin>".
+- MC: **Acknowledge**, then **Added to BatSys?**. Each can be tapped by a different admin. Only admins see the BatSys tick; the soldier is not told.
 
 A tap appends the outcome to every admin's copy and to the soldier's summary. It also sends the soldier a reply, so they get a notification. Attached files stay. Buttons stop working after 7 days.
 

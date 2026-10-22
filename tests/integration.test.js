@@ -1,7 +1,7 @@
 // Calls the handler directly with fetch mocked to the dummy backend.
 import { afterAll, beforeEach, expect, test } from 'bun:test';
 import handler, { today as day } from '../api/webhook.js';
-import { ADMINS, APPT_FLOW, ENV, MC_FLOW, SICK_FLOW, USER, adminTap, SUBMIT, adminText, doc, fakeBackend, groupText, photo, tap, text } from './fake.js';
+import { ADMINS, APPT_DAY, APPT_FLOW, ENV, MC_FLOW, SICK_FLOW, USER, adminTap, SUBMIT, adminText, doc, fakeBackend, groupText, photo, tap, text } from './fake.js';
 
 const realFetch = globalThis.fetch;
 let b;
@@ -30,11 +30,11 @@ const edits = (from = 0) => b.calls.slice(from).filter((c) => c.method === 'edit
 const approveSick = async (admin = ADMINS[0]) => { await sendAll(SICK_FLOW); await send(adminTap(admin, keys(admin)[0].callback_data)); };
 /** MC_FLOW (first `n` steps) linked to the first open request offered. */
 const linkedMc = async (n = MC_FLOW.length) => {
-  await sendAll(MC_FLOW.slice(0, 3));
+  await sendAll(MC_FLOW.slice(0, 4));
   await send(tap(lastToUser().reply_markup.inline_keyboard[0][0].callback_data));
-  await sendAll(MC_FLOW.slice(3, n));
+  await sendAll(MC_FLOW.slice(4, n));
 };
-const lastToUser = () => b.calls.findLast((c) => c.chat_id === USER.id && c.method === 'sendMessage');
+const lastToUser = () => b.calls.findLast((c) => c.chat_id === USER.id && c.method === 'sendMessage' && !c.text.startsWith('Reminder:')); // the reminder follows the approval's button message
 const summaryId = (needle) => b.calls.findLast((c) => c.chat_id === USER.id && c.text?.includes(needle) && c.text.endsWith('Submitted ✅')).result.message_id;
 
 test('sick flow sends the request to every admin', async () => {
@@ -78,20 +78,34 @@ test('approve marks every admin copy, tells the soldier, offers the MC button', 
   for (const e of done) {
     expect(e.text).toStartWith('[For Admin] 🤒 REQUEST TO REPORT SICK');
     expect(e.text).toContain('Medical Condition: Fever and sore throat');
-    expect(e.text).toEndWith('\n\n✅ Admin B has approved');
-    expect(e.reply_markup).toBeUndefined();
+    expect(e.text).toEndWith('\n\n✅ Approved by Admin B');
+    expect(e.reply_markup.inline_keyboard[0]).toEqual([{ text: 'Added to BatSys?', callback_data: callback_data.replace('approve', 'batsys') }]);
   }
-  expect(b.userEdit()).toEndWith('\n\n✅ Admin B has approved');
+  expect(b.userEdit()).toEndWith('\n\n✅ Approved by Admin B');
   const summary = summaryId('REPORT SICK');
   expect(b.calls.findLast((c) => c.chat_id === USER.id && c.method === 'editMessageText').message_id).toBe(summary);
   const note = lastToUser();
-  expect(note.text).toStartWith('✅ Admin B has approved');
+  expect(note.text).toStartWith('✅ Approved by Admin B');
   expect(note.reply_to_message_id).toBe(summary);
   expect(note.reply_markup.inline_keyboard[0][0]).toMatchObject({ text: '📄 Send MC / Status', callback_data: callback_data.replace('approve', 'mcfor') });
   const after = b.calls.length;
   await send(adminTap(ADMINS[0], callback_data)); // second tap
   await send(adminTap(ADMINS[0], keys(ADMINS[0])[1].callback_data)); // late reject
   expect(b.calls.slice(after).map((c) => c.method)).toEqual(['answerCallbackQuery', 'answerCallbackQuery']);
+});
+
+test.each([['sick', SICK_FLOW], ['appt', APPT_FLOW]])('after approving a %s request, Added to BatSys? is admin-only and ends the buttons', async (_, flow) => {
+  await sendAll(flow);
+  const { callback_data } = button(ADMINS[0]);
+  await send(adminTap(ADMINS[1], callback_data));
+  const before = b.calls.length;
+  await send(adminTap(ADMINS[0], callback_data.replace('approve', 'batsys')));
+  for (const e of edits(before)) {
+    expect(e.text).toEndWith('\n\n✅ Approved by Admin B\n✅ Added to BatSys by Admin A');
+    expect(e.reply_markup).toBeUndefined();
+  }
+  expect(b.userEdit()).not.toContain('BatSys');
+  expect(b.calls.slice(before).filter((c) => c.chat_id === USER.id && c.method === 'sendMessage')).toHaveLength(0);
 });
 
 test('non-admin cannot approve or reject', async () => {
@@ -144,10 +158,10 @@ test('reject loses to an approval made while the reason was being typed', async 
   const before = b.calls.length;
   await send(adminText(ADMINS[0], 'too late'));
   expect(b.calls.slice(before).map((c) => [c.method, c.text])).toEqual([['editMessageText', '[For Admin] Already approved by Admin B']]);
-  expect(b.userEdit()).toEndWith('✅ Admin B has approved');
+  expect(b.userEdit()).toEndWith('✅ Approved by Admin B');
 });
 
-test('MC threads under the approved request, then acknowledge and BatSys tick independently', async () => {
+test('MC threads under the approved request, then acknowledge, then BatSys tick', async () => {
   await approveSick();
   await linkedMc();
   await sendAll([photo(), SUBMIT]);
@@ -156,12 +170,13 @@ test('MC threads under the approved request, then acknowledge and BatSys tick in
     expect(mc.text).toContain('📄 MC / STATUS\nPTE Tan Ah Kow\nFor: 🤒 ');
     expect(mc.text).toContain('sick request');
     expect(mc.reply_parameters).toEqual({ message_id: sick.result.message_id, allow_sending_without_reply: true });
-    expect(mc.reply_markup.inline_keyboard[0].map((k) => k.text)).toEqual(['👍 Acknowledge', 'Added to BatSys?']);
+    expect(mc.reply_markup.inline_keyboard[0].map((k) => k.text)).toEqual(['👍 Acknowledge']);
   }
   const mcSummary = lastToUser();
   expect(mcSummary.reply_parameters.message_id).toBe(summaryId('REPORT SICK'));
   expect(b.store.get('grant:111').size).toBe(0); // consumed
-  const [seen, batsys] = keys(ADMINS[0]);
+  const [seen] = keys(ADMINS[0]);
+  const batsys = { callback_data: seen.callback_data.replace('seen:', 'batsys:') };
 
   let before = b.calls.length;
   await send(adminTap(ADMINS[1], seen.callback_data));
@@ -188,24 +203,13 @@ test('MC threads under the approved request, then acknowledge and BatSys tick in
   expect(b.calls.slice(before).map((c) => c.method)).toEqual(['answerCallbackQuery']);
 });
 
-test('BatSys before acknowledge: the soldier never sees the BatSys tick', async () => {
-  await approveSick();
-  await linkedMc();
-  await sendAll([photo(), SUBMIT]);
-  const [seen, batsys] = keys(ADMINS[0]);
-  await send(adminTap(ADMINS[0], batsys.callback_data));
-  await send(adminTap(ADMINS[1], seen.callback_data));
-  expect(edits().at(-1).text).toEndWith('\n\n👍 Acknowledged by Admin B\n✅ Added to BatSys by Admin A');
-  expect(b.userEdit()).toEndWith('\n\n👍 Acknowledged by Admin B');
-  expect(b.userEdit()).not.toContain('BatSys');
-});
-
 test('MC without any prior request goes straight to the questions, unlinked', async () => {
   await sendAll([text('/start'), tap('rank:CPL'), text('Lim Bee Hoon'), tap('type:mc')]);
-  expect(b.toUser().at(-1)).toBe('What new status are you given / What is your reason for MC?');
+  expect(b.toUser().at(-1)).toContain(`Complete the (<a href="https://go.gov.sg/medicalforms-40sar">40 SAR Report Sick Form</a>), and send the FormSG's Response ID e.g. 6ad8500b1d0ae72f026cfa75`);
+  expect(lastToUser().parse_mode).toBe('HTML');
   await sendAll([...MC_FLOW.slice(3), photo(), SUBMIT]);
   const [mc] = posts(ADMINS[0]);
-  expect(mc.text).toContain('📄 MC / STATUS\nCPL Lim Bee Hoon\nReason / Status: Sprained ankle');
+  expect(mc.text).toContain('📄 MC / STATUS\nCPL Lim Bee Hoon\nFormSG Response ID: 6ad8500b1d0ae72f026cfa75\nReason / Status: Sprained ankle');
   expect(mc.text).not.toContain('For:');
   expect(mc.reply_parameters).toBeUndefined();
   expect(b.store.has('grant:111')).toBe(false);
@@ -215,18 +219,37 @@ test('the MC is consumed: a second MC no longer offers that request', async () =
   await approveSick();
   await linkedMc();
   await sendAll([photo(), SUBMIT]);
-  await sendAll(MC_FLOW.slice(0, 3));
+  await sendAll(MC_FLOW.slice(0, 4));
   expect(b.toUser().at(-1)).toBe('What new status are you given / What is your reason for MC?');
+});
+
+test('a second bad Response ID skips the question; the summary has no ID line', async () => {
+  await sendAll([text('/start'), tap('rank:CPL'), text('Lim Bee Hoon'), tap('type:mc'), text('nope')]);
+  expect(b.toUser().at(-1)).toContain('Invalid Response ID');
+  await send(text('still nope'));
+  expect(b.toUser().at(-1)).toBe('What new status are you given / What is your reason for MC?');
+  await sendAll([...MC_FLOW.slice(4), photo(), SUBMIT]);
+  expect(posts(ADMINS[0]).at(-1).text).not.toContain('FormSG');
+});
+
+test('approving a sick request reminds about the 40 SAR form; an appointment does not', async () => {
+  await approveSick();
+  const reminder = `Reminder: After visiting the doctor, complete the (<a href="https://go.gov.sg/medicalforms-40sar">40 SAR Report Sick Form</a>), and keep the FormSG's Response ID e.g. 6ad8500b1d0ae72f026cfa75`;
+  expect(b.calls.some((c) => c.chat_id === USER.id && c.text === reminder && c.parse_mode === 'HTML')).toBe(true);
+  const count = () => b.calls.filter((c) => c.text?.startsWith('Reminder:')).length;
+  await sendAll([text('/start'), tap('profile:yes'), ...APPT_FLOW.slice(3)]);
+  await send(adminTap(ADMINS[0], keys(ADMINS[0])[0].callback_data));
+  expect(count()).toBe(1);
 });
 
 test('an open request can be skipped: "Not for any request above" sends an unlinked MC', async () => {
   await approveSick();
-  await sendAll(MC_FLOW.slice(0, 3));
+  await sendAll(MC_FLOW.slice(0, 4));
   const opts = lastToUser().reply_markup.inline_keyboard.map(([k]) => k);
   expect(opts.map((k) => k.text)).toEqual([expect.stringMatching(/^🤒 .* sick request$/), '📄 Not for any request above']);
-  await sendAll([tap('link:none'), ...MC_FLOW.slice(3), photo(), SUBMIT]);
+  await sendAll([tap('link:none'), ...MC_FLOW.slice(4), photo(), SUBMIT]);
   const mc = posts(ADMINS[0]).at(-1);
-  expect(mc.text).toContain('📄 MC / STATUS\nPTE Tan Ah Kow\nReason / Status:');
+  expect(mc.text).toContain('📄 MC / STATUS\nPTE Tan Ah Kow\nFormSG Response ID: 6ad8500b1d0ae72f026cfa75\nReason / Status:');
   expect(mc.reply_parameters).toBeUndefined();
   expect(b.store.get('grant:111').size).toBe(1); // still open
 });
@@ -235,37 +258,40 @@ test('two open requests: soldier picks which one the MC is for', async () => {
   await approveSick();
   await sendAll([text('/start'), tap('profile:yes'), ...APPT_FLOW.slice(3)]);
   await send(adminTap(ADMINS[1], keys(ADMINS[1])[0].callback_data));
-  await sendAll(MC_FLOW.slice(0, 3));
+  await sendAll(MC_FLOW.slice(0, 4));
   const q = lastToUser();
   expect(q.text).toBe('Which request is this MC / Status for?');
   const opts = q.reply_markup.inline_keyboard.map(([k]) => k);
-  expect(opts.map((k) => k.text)).toEqual([expect.stringMatching(/^🤒 .* sick request$/), expect.stringMatching(/^🏥 .* medical appointment 20\/10\/2026 1400$/), '📄 Not for any request above']);
-  await sendAll([tap(opts[1].callback_data), ...MC_FLOW.slice(3), photo(), SUBMIT]);
+  expect(opts.map((k) => k.text)).toEqual([expect.stringMatching(/^🤒 .* sick request$/), expect.stringContaining(`medical appointment ${APPT_DAY} 1400`), '📄 Not for any request above']);
+  await sendAll([tap(opts[1].callback_data), ...MC_FLOW.slice(4), photo(), SUBMIT]);
   const [, appt, mc] = posts(ADMINS[1]);
   expect(mc.text).toContain(`For: ${opts[1].text}`);
   expect(mc.reply_parameters.message_id).toBe(appt.result.message_id);
   expect([...b.store.get('grant:111').keys()]).toEqual([opts[0].callback_data.slice(5)]);
 });
 
-test('"Send MC / Status" under the approval starts a linked MC with only 4 questions', async () => {
+test('"Send MC / Status" under the approval starts a linked MC with only 5 questions', async () => {
   await approveSick();
   const mcfor = lastToUser().reply_markup.inline_keyboard[0][0].callback_data;
   await send(tap(mcfor));
-  expect(b.toUser().at(-1)).toMatch(/^For: 🤒 .* sick request\n\nWhat new status are you given/);
+  expect(b.toUser().at(-1)).toMatch(/^For: 🤒 .* sick request\n\nComplete the/);
+  await send(text('6ad8500b1d0ae72f026cfa75'));
+  expect(b.toUser().at(-1)).toBe('What new status are you given / What is your reason for MC?');
   await sendAll([text('Light duty'), tap('today')]);
   expect(JSON.parse(b.store.get('form:111')).start).toBe(day());
-  await sendAll([text('31/12/2099'), photo(), SUBMIT]);
+  await sendAll([text(APPT_DAY), photo(), SUBMIT]);
   expect(posts(ADMINS[0]).at(-1).text).toContain(`PTE Tan Ah Kow\nFor: 🤒`);
-  expect(posts(ADMINS[0]).at(-1).text).toContain(`From ${day()} to 31/12/2099`);
+  expect(posts(ADMINS[0]).at(-1).text).toContain(`From ${day()} to ${APPT_DAY}`);
   await send(tap(mcfor)); // already used
   expect(b.toUser().at(-1)).toBe('This request already has an MC / Status, or it has expired.');
 });
 
 test('appointment grant stays open until a week after the appointment', async () => {
-  await sendAll([...APPT_FLOW.slice(0, 5), text('20/10/2099 1400'), ...APPT_FLOW.slice(6)]);
+  const [d, m, y] = new Date(Date.now() + 100 * 864e5).toLocaleDateString('en-GB', { timeZone: 'Asia/Singapore' }).split('/').map(Number);
+  await sendAll([...APPT_FLOW.slice(0, 5), text(`${d}/${m}/${y} 1400`), ...APPT_FLOW.slice(6)]);
   await send(adminTap(ADMINS[0], keys(ADMINS[0])[0].callback_data));
   const [g] = b.store.get('grant:111').values();
-  expect(JSON.parse(g).until).toBe(Date.UTC(2099, 9, 27, 14, 0));
+  expect(JSON.parse(g).until).toBe(Date.UTC(y, m - 1, d + 7, 14, 0) - 8 * 3600e3); // SGT wall clock to epoch
 });
 
 test('second request offers the saved profile; Change re-asks rank and name', async () => {
@@ -288,14 +314,14 @@ test('appointment flow sends summary + screenshot; approve updates copies and te
     const [post, copy] = b.toAdmin(admin);
     expect(post.text).toContain('REQUEST TO ATTEND MEDICAL APPOINTMENT');
     expect(post.text).toContain('Reason: Eczema');
-    expect(post.text).toContain('Time: 20/10/2026 1400');
+    expect(post.text).toContain(`Time: ${APPT_DAY} 1400`);
     expect(post.text).toContain('Clinic: SGH Dermatology');
     expect(post.text).toContain("I will seek my commander's approval");
     expect(copy.method).toBe('copyMessage');
   }
   await send(adminTap(ADMINS[0], button(ADMINS[0]).callback_data));
-  expect(edits().every((e) => e.text.includes('Reason: Eczema') && e.text.endsWith('\n\n✅ Admin A has approved'))).toBe(true);
-  expect(b.userEdit()).toEndWith('\n\n✅ Admin A has approved');
+  expect(edits().every((e) => e.text.includes('Reason: Eczema') && e.text.endsWith('\n\n✅ Approved by Admin A'))).toBe(true);
+  expect(b.userEdit()).toEndWith('\n\n✅ Approved by Admin A');
 });
 
 test('/overview shows counts, who is waiting, and each status, for admins only', async () => {
@@ -319,7 +345,7 @@ test('/overview shows counts, who is waiting, and each status, for admins only',
     '',
     '⏳ Waiting',
     'PTE Tan Ah Kow, MC 10/10/2026 to 12/10/2026',
-    'PTE Tan Ah Kow, medical appointment 20/10/2026 1400',
+    `PTE Tan Ah Kow, medical appointment ${APPT_DAY} 1400`,
     '',
     '📄 Awaiting MC',
     'PTE Tan Ah Kow, sick request',
@@ -330,7 +356,7 @@ test('/overview shows counts, who is waiting, and each status, for admins only',
     'PTE Tan Ah Kow, sick request – ✅ approved by Admin A',
     '',
     '🏥 Medical appointment',
-    'PTE Tan Ah Kow, medical appointment 20/10/2026 1400 – ⏳ waiting',
+    `PTE Tan Ah Kow, medical appointment ${APPT_DAY} 1400 – ⏳ waiting`,
     '',
     '📄 MC / Status',
     'PTE Tan Ah Kow, MC 10/10/2026 to 12/10/2026 – ⏳ not yet acknowledged',
@@ -392,7 +418,7 @@ test('invalid time is re-asked without advancing', async () => {
 
 test('end date before start date is rejected', async () => {
   await approveSick();
-  await linkedMc(5);
+  await linkedMc(6);
   await send(text('09/10/2026'));
   expect(b.toUser().at(-1)).toContain('cannot be before');
   await send(text('31/02/2026'));
@@ -434,9 +460,10 @@ const reach = {
   purpose: () => sendAll(APPT_FLOW.slice(0, 4)),
   when: () => sendAll(APPT_FLOW.slice(0, 5)),
   venue: () => sendAll(APPT_FLOW.slice(0, 6)),
-  reason: async () => { await approveSick(); await linkedMc(3); },
-  start: async () => { await approveSick(); await linkedMc(4); },
-  end: async () => { await approveSick(); await linkedMc(5); },
+  formsg: async () => { await approveSick(); await sendAll(MC_FLOW.slice(0, 3)); },
+  reason: async () => { await approveSick(); await linkedMc(4); },
+  start: async () => { await approveSick(); await linkedMc(5); },
+  end: async () => { await approveSick(); await linkedMc(6); },
 };
 test.each([
   ['name', 'Tan123', 'letters only'],
@@ -445,8 +472,9 @@ test.each([
   ['clinic', '123', 'in words'],
   ['time', '2500', 'Invalid time'],
   ['purpose', '/cancelled', 'Commands are not valid answers'],
-  ['when', '20/10/2026', 'Invalid date/time'],
+  ['when', APPT_DAY, 'Invalid date/time'],
   ['venue', '42', 'in words'],
+  ['formsg', 'abc', 'Invalid Response ID'],
   ['reason', '!!!', 'in words'],
   ['start', '2026-10-10', 'Invalid date'],
   ['end', '09/10/2026', 'cannot be before'],
@@ -464,7 +492,7 @@ test.each(Object.keys(reach))('/start at the %s step restarts the form', async (
   await reach[step]();
   await send(text('/start'));
   const fresh = JSON.parse(b.store.get('form:111'));
-  expect(fresh.step).toBe(step === 'reason' || step === 'start' || step === 'end' ? 'profile' : 'rank');
+  expect(fresh.step).toBe(step === 'formsg' || step === 'reason' || step === 'start' || step === 'end' ? 'profile' : 'rank');
   expect(fresh[step]).toBeUndefined();
 });
 
@@ -541,13 +569,6 @@ test('double tap on Submit sends once and starts nothing', async () => {
   expect(b.store.has('form:111')).toBe(false);
 });
 
-test('/new restarts mid-form like /start', async () => {
-  await sendAll(SICK_FLOW.slice(0, 5));
-  await send(text('/new'));
-  expect(b.toUser().at(-1)).toBe('What is your Rank?');
-  expect(JSON.parse(b.store.get('form:111')).step).toBe('rank');
-});
-
 test('edited messages are ignored', async () => {
   await sendAll(SICK_FLOW.slice(0, 3));
   const before = b.calls.length;
@@ -609,7 +630,7 @@ test('"Send MC / Status" mid-form replaces that form; an unknown id is refused',
   const mcfor = lastToUser().reply_markup.inline_keyboard[0][0].callback_data;
   await sendAll([text('/start'), tap('profile:yes'), tap('type:sick')]);
   await send(tap(mcfor));
-  expect(JSON.parse(b.store.get('form:111'))).toMatchObject({ step: 'reason', type: 'mc' });
+  expect(JSON.parse(b.store.get('form:111'))).toMatchObject({ step: 'formsg', type: 'mc' });
   await send(tap('mcfor:bogus'));
   expect(b.toUser().at(-1)).toBe('This request already has an MC / Status, or it has expired.');
 });
@@ -665,4 +686,24 @@ test('/overview on a day with no submissions', async () => {
 test('backend errors still return 200', async () => {
   globalThis.fetch = async () => Response.json({ error: 'redis down' });
   expect(await send(text('/start'))).toBe(200);
+});
+
+test('a second Submit while the first is in flight sends nothing', async () => {
+  await sendAll(SICK_FLOW.slice(0, -1));
+  b.store.set('submit:111', '1');
+  await send(SUBMIT);
+  expect(posts(ADMINS[0])).toHaveLength(0);
+});
+
+test('a button the request no longer offers is ignored', async () => {
+  await sendAll(SICK_FLOW);
+  const id = button(ADMINS[0]).callback_data.split(':')[1];
+  for (const action of ['seen', 'batsys']) await send(adminTap(ADMINS[0], `${action}:${id}`));
+  expect(edits()).toHaveLength(0);
+});
+
+test('an admin tapping a button on their own request is told why', async () => {
+  b.store.set('sub:own', new Map([['data', JSON.stringify({ id: 'own', user: ADMINS[0], type: 'sick', msgs: [] })]]));
+  await send(adminTap(ADMINS[0], 'approve:own'));
+  expect(b.toAdmin(ADMINS[0]).at(-1).text).toContain('cannot act on your own request');
 });
