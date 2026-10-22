@@ -52,12 +52,12 @@ test('sick request reaches the admins over HTTP', async () => {
 test('admin approval reaches the soldier over HTTP', async () => {
   const sent = b.toAdmin(ADMINS[0]).findLast((c) => c.method === 'sendMessage');
   expect((await post(adminTap(ADMINS[0], sent.reply_markup.inline_keyboard[0][0].callback_data))).status).toBe(200);
-  expect(b.userEdit()).toEndWith('\n\n✅ Admin A has approved');
+  expect(b.userEdit()).toEndWith('\n\n✅ Approved by Admin A');
 });
 
 test('MC for the approved request reaches the admins over HTTP', async () => {
   const [grant] = b.store.get('grant:111').keys();
-  const flow = [...MC_FLOW.slice(0, 3), tap(`link:${grant}`), ...MC_FLOW.slice(3), doc('application/pdf'), SUBMIT];
+  const flow = [...MC_FLOW.slice(0, 4), tap(`link:${grant}`), ...MC_FLOW.slice(4), doc('application/pdf'), SUBMIT];
   for (const u of flow) expect((await post(u)).status).toBe(200);
   const [summary, file] = b.toAdmin(ADMINS[1]).slice(-2);
   expect(summary.text).toContain('MC / STATUS');

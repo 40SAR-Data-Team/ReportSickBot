@@ -8,6 +8,9 @@ const ACK = "I will wait for my commander's approval before I report sick";
 const PLEDGE = "I will seek my commander's approval before heading for my Medical Appointment";
 const WEEK = 604800; // seconds
 const UNLINKED = '📄 Not for any request above';
+const HTML = { parse_mode: 'HTML' };
+const FORM = '(<a href="https://go.gov.sg/medicalforms-40sar">40 SAR Report Sick Form</a>)';
+const EG = '6ad8500b1d0ae72f026cfa75'; // example FormSG Response ID
 
 const FOR_ADMIN = '[For Admin]'; // prefix on everything the bot sends to admins
 const btn = (text, data) => ({ text, callback_data: data });
@@ -34,6 +37,7 @@ const QUESTIONS = {
   pledge: [`${PLEDGE}.`, [[btn('✅ I acknowledge', 'pledge:yes')]]],
   link: (s) => ['Which request is this MC / Status for?',
     [...s.grants.map(([id, g]) => [btn(g.label, `link:${id}`)]), [btn(UNLINKED, 'link:none')]]],
+  formsg: [`Complete the ${FORM}, and send the FormSG's Response ID e.g. ${EG}`, undefined, HTML],
   reason: ['What new status are you given / What is your reason for MC?'],
   start: () => ['Start Date of MC / Status? (DD/MM/YYYY)', [[btn(`Today (${today()})`, 'today')]]],
   end: ['End Date of MC / Status? (DD/MM/YYYY)'],
@@ -45,7 +49,7 @@ const QUESTIONS = {
 const FLOWS = {
   sick: ['condition', 'clinic', 'time', 'ack', 'review'],
   appt: ['purpose', 'when', 'venue', 'shot', 'pledge', 'review'],
-  mc: ['link', 'reason', 'start', 'end', 'file', 'review'],
+  mc: ['formsg', 'link', 'reason', 'start', 'end', 'file', 'review'],
 };
 const BUTTON_STEPS = new Set(['profile', 'rank', 'type', 'ack', 'pledge', 'link', 'review']);
 
@@ -59,6 +63,9 @@ export function parseDateTime(text, withTime) {
   return valid ? date : null;
 }
 
+/** Start of today in Singapore, on the same wall-clock-as-UTC scale as parseDateTime. */
+const today0 = () => parseDateTime(today(), false);
+const YEAR = 366 * 86400e3;
 const WORDS = new Set(['condition', 'clinic', 'purpose', 'venue', 'reason']);
 /** Error message for a typed answer at `step` of form `s`, or null if valid. */
 export function invalid(step, text, s) {
@@ -68,11 +75,19 @@ export function invalid(step, text, s) {
   if (text.length > 500) return 'Too long, please keep it under 500 characters.';
   if (step === 'name' && !/^[A-Za-z][A-Za-z .'\/@-]{0,59}$/.test(text)) return 'Please type your name in letters only (e.g. Tan Ah Kow).';
   if (WORDS.has(step) && !/[A-Za-z]/.test(text)) return 'Please describe it in words.';
-  if (step === 'time' && !parseDateTime(`${today()} ${text}`, true)) return 'Invalid time.';
-  if (step === 'when' && !parseDateTime(text, true)) return 'Invalid date/time.';
+  if (step === 'formsg' && !/^[0-9a-f]{24}$/i.test(text)) return `Invalid Response ID, e.g. ${EG}`;
+  if (step === 'time' && !parseDateTime(`${today()} ${text}`, true)) return 'Invalid time. Use 24h, e.g. 0830.';
+  if (step === 'when') {
+    const when = parseDateTime(text, true);
+    if (!when) return 'Invalid date/time. Use DD/MM/YYYY HHMM, e.g. 25/12/2026 0930.';
+    if (when < today0()) return 'The appointment cannot be in the past.';
+    if (when - today0() > YEAR) return 'The appointment is too far ahead.';
+  }
   if (step !== 'start' && step !== 'end') return null;
   const date = parseDateTime(text, false);
-  if (!date) return 'Invalid date.';
+  if (!date) return 'Invalid date. Use DD/MM/YYYY.';
+  if (Math.abs(date - today0()) > YEAR) return 'That date is too far from today.';
+  if (step === 'end' && date - parseDateTime(s.start, false) > YEAR) return 'MC / Status cannot be longer than a year.';
   if (step === 'end' && date < parseDateTime(s.start, false)) return 'End date cannot be before the start date.';
   if (step === 'start' && s.end && date > parseDateTime(s.end, false)) return 'Start date cannot be after the end date.';
   return null;
@@ -116,8 +131,8 @@ async function hput(key, field, value, ttl) {
 
 function ask(chat, step, prefix, s) {
   const q = QUESTIONS[step];
-  const [text, keyboard] = typeof q === 'function' ? q(s) : q;
-  return send(chat, prefix ? `${prefix}\n\n${text}` : text, { reply_markup: keyboard && { inline_keyboard: keyboard } });
+  const [text, keyboard, extra] = typeof q === 'function' ? q(s) : q;
+  return send(chat, prefix ? `${prefix}\n\n${text}` : text, { reply_markup: keyboard && { inline_keyboard: keyboard }, ...extra });
 }
 
 // ADMINS env var: JSON {"name": telegramId}. Unset means no admins, so the submit fails loudly.
@@ -134,7 +149,7 @@ const linkTo = ([id, g]) => ({ link: id, grant: g, rank: g.rank, name: g.name })
 function outcome(f, soldier) {
   const d = f.decided && JSON.parse(f.decided);
   return [
-    d && (d.v === 'approved' ? `✅ ${d.by} has approved` : `❌ Rejected by ${d.by}${d.reason ? `\nReason: ${d.reason}` : ''}`),
+    d && (d.v === 'approved' ? `✅ Approved by ${d.by}` : `❌ Rejected by ${d.by}${d.reason ? `\nReason: ${d.reason}` : ''}`),
     f.seen && `👍 Acknowledged by ${f.seen}`,
     !soldier && f.batsys && `✅ Added to BatSys by ${f.batsys}`,
   ].filter(Boolean);
@@ -142,8 +157,10 @@ function outcome(f, soldier) {
 
 /** Admin buttons still open on a submission. */
 function buttons(sub, f) {
-  if (sub.type === 'mc') return [!f.seen && btn('👍 Acknowledge', `seen:${sub.id}`), !f.batsys && btn('Added to BatSys?', `batsys:${sub.id}`)].filter(Boolean);
-  return f.decided ? [] : [btn('✅ Approve', `approve:${sub.id}`), btn('❌ Reject', `reject:${sub.id}`)];
+  const batsys = !f.batsys && btn('Added to BatSys?', `batsys:${sub.id}`);
+  if (sub.type === 'mc') return [f.seen ? batsys : btn('👍 Acknowledge', `seen:${sub.id}`)].filter(Boolean);
+  if (!f.decided) return [btn('✅ Approve', `approve:${sub.id}`), btn('❌ Reject', `reject:${sub.id}`)];
+  return JSON.parse(f.decided).v === 'approved' ? [batsys].filter(Boolean) : [];
 }
 
 /** Summary lines of a filled form, shown for review and sent to admins. */
@@ -151,7 +168,7 @@ function details(s) {
   return {
     sick: ['🤒 REQUEST TO REPORT SICK', who(s), `Medical Condition: ${s.condition}`, `Clinic: ${s.clinic}`, `Time: ${s.time}`, `✅ ${ACK}`],
     appt: ['🏥 REQUEST TO ATTEND MEDICAL APPOINTMENT', who(s), `Reason: ${s.purpose}`, `Time: ${s.when}`, `Clinic: ${s.venue}`, `✅ ${PLEDGE}`],
-    mc: ['📄 MC / STATUS', who(s), s.grant && `For: ${s.grant.label}`, `Reason / Status: ${s.reason}`, `From ${s.start} to ${s.end}`],
+    mc: ['📄 MC / STATUS', who(s), s.grant && `For: ${s.grant.label}`, s.formsg && `FormSG Response ID: ${s.formsg}`,`Reason / Status: ${s.reason}`, `From ${s.start} to ${s.end}`],
   }[s.type].filter(Boolean);
 }
 
@@ -197,12 +214,10 @@ const ICONS = { approved: '✅', rejected: '❌', seen: '👍', wait: '⏳' };
 async function overview(chat) {
   const day = today();
   const rows = Object.values(await hash(`day:${day}`)).map((v) => JSON.parse(v)).sort((a, b) => a.at.localeCompare(b.at));
-  // ponytail: rows logged before reject/acknowledge existed carry `by`; drop this once they expire (8 days)
-  rows.forEach((r) => r.by && (r.type === 'mc' ? (r.batsys ??= r.by) : (r.decided ??= { v: 'approved', by: r.by })));
   const state = (r) => (r.type === 'mc' ? r.seen && 'seen' : r.decided?.v) || 'wait';
   const status = (r) => (r.type === 'mc'
     ? [r.seen ? `👍 acknowledged by ${r.seen}` : '⏳ not yet acknowledged', r.batsys && `✅ BatSys by ${r.batsys}`].filter(Boolean).join(' · ')
-    : r.decided ? `${ICONS[r.decided.v]} ${r.decided.v} by ${r.decided.by}` : '⏳ waiting');
+    : [r.decided ? `${ICONS[r.decided.v]} ${r.decided.v} by ${r.decided.by}` : '⏳ waiting', r.batsys && `✅ BatSys by ${r.batsys}`].filter(Boolean).join(' · '));
   const list = (title, rs, more) => `${title}\n${rs.map((r) => `${r.at} ${r.label}${more ? ` – ${more(r)}` : ''}`).join('\n') || 'None'}`;
   const counts = SECTIONS.map(([type, title]) => {
     const rs = rows.filter((r) => r.type === type);
@@ -248,7 +263,7 @@ async function apply(id, field, value, notify, markup) {
 /** Lets the soldier chain an MC / Status to this approved request. */
 async function grant(sub) {
   // an appointment's MC comes after the appointment, so keep it open until a week past it
-  const from = sub.type === 'appt' ? Math.max(Date.now(), +parseDateTime(sub.when, true)) : Date.now();
+  const from = sub.type === 'appt' ? Math.max(Date.now(), +parseDateTime(sub.when, true) - 8 * 3600e3) : Date.now();
   const g = {
     rank: sub.rank, name: sub.name, summary: sub.summary, msgs: sub.msgs, day: sub.day, until: from + WEEK * 1000,
     label: `${sub.type === 'appt' ? '🏥' : '🤒'} ${sub.day.slice(0, 5)} ${sub.at} ${sub.kind}`,
@@ -285,11 +300,25 @@ async function finishReject(chat, name, reason, id) {
   return true;
 }
 
+/** 'own' for an admin acting on their own submission, false for a button the submission no longer offers (stale / replayed tap). */
+async function allowed(chat, id, action) {
+  const f = await hash(`sub:${id}`);
+  if (!f.data) return true; // expired: apply / askReason say so
+  const sub = JSON.parse(f.data);
+  if (sub.user === chat) return 'own';
+  return buttons(sub, f).some((b) => b.callback_data === `${action}:${id}`);
+}
+
 /** Admin tapped a button on a submission (or on a reject prompt). */
 async function decide(cb, name) {
   if (!name) return;
   const [action, id] = cb.data.split(':');
   const chat = cb.message.chat.id;
+  if (/^(approve|reject|seen|batsys)$/.test(action)) {
+    const ok = await allowed(chat, id, action);
+    if (ok === 'own') return send(chat, `${FOR_ADMIN} You cannot act on your own request. Another admin must.`);
+    if (!ok) return;
+  }
   if (action === 'reject') return askReason(chat, id, cb.message.message_id);
   if (action === 'rejskip') return finishReject(chat, name, null, id);
   if (action === 'rejcancel') {
@@ -297,9 +326,10 @@ async function decide(cb, name) {
     return tg('editMessageText', { chat_id: chat, message_id: cb.message.message_id, text: `${FOR_ADMIN} Rejection cancelled.` });
   }
   if (action === 'approve') {
-    const notify = `✅ ${name} has approved\n\nAfter your visit, tap below to send your MC / Status.`;
+    const notify = `✅ Approved by ${name}\n\nAfter your visit, tap below to send your MC / Status.`;
     const sub = await apply(id, 'decided', JSON.stringify({ v: 'approved', by: name }), notify,
       { inline_keyboard: [[btn('📄 Send MC / Status', `mcfor:${id}`)]] });
+    if (sub?.type === 'sick') await send(sub.user, `Reminder: After visiting the doctor, complete the ${FORM}, and keep the FormSG's Response ID e.g. ${EG}`, HTML);
     return sub && grant(sub);
   }
   return apply(id, action, name, action === 'seen' && `👍 Acknowledged by ${name}`);
@@ -324,7 +354,6 @@ async function handle(update) {
   if (admin && text === '/overview') return overview(chat);
   if (admin && text && !text.startsWith('/') && await finishReject(chat, admin, text)) return;
 
-  if (text === '/new') text = '/start';
   if (text === '/start' || text === '/cancel') {
     await redis('DEL', key, `rej:${chat}`);
     if (text === '/cancel') return send(chat, 'Cancelled. Send /start to begin again.');
@@ -338,14 +367,14 @@ async function handle(update) {
     return send(chat, 'This request already has an MC / Status, or it has expired.');
   }
   const fresh = !s;
-  if (mcfor) s = { step: 'reason', type: 'mc', ...linkTo(mcfor) };
+  if (mcfor) s = { step: 'formsg', type: 'mc', ...linkTo(mcfor) };
   else if (!s) s = await blank(chat);
   // Every message in the form (both sides) is tracked, then deleted on submit.
   s.ids ??= [];
   if (update.message) s.ids.push(update.message.message_id);
   const save = () => redis('SET', key, JSON.stringify(s), 'EX', 3600);
   const reply = async (step, prefix) => { s.ids.push((await ask(chat, step, prefix, s)).message_id); return save(); };
-  if (mcfor) return reply('reason', `For: ${s.grant.label}`);
+  if (mcfor) return reply('formsg', `For: ${s.grant.label}`);
   if (fresh) return cb ? undefined : reply(s.step); // tap on a submitted / expired form: ignore
   if (cb?.data === 'today' && s.step === 'start') text = today();
 
@@ -377,8 +406,9 @@ async function handle(update) {
     s.caption = m.caption;
   } else {
     const err = invalid(s.step, text, s);
-    if (err) return reply(s.step, err);
-    value = s.step === 'time' ? `${today()} ${text}` : text;
+    // ponytail: a 2nd bad Response ID skips the question instead of blocking the MC
+    if (err && (s.step !== 'formsg' || (s.strikes = (s.strikes ?? 0) + 1) < 2)) return reply(s.step, err);
+    value = err ? '' : s.step === 'time' ? `${today()} ${text}` : text;
   }
 
   s[s.step] = value;
@@ -391,6 +421,7 @@ async function handle(update) {
     Object.assign(s, linkTo(picked));
     prefix = `For: ${s.grant.label}`;
   }
+  if (next === 'link' && s.link) next = 'reason'; // already linked via the approval's button
   if (next === 'link') {
     // Some soldiers report sick without the app, so an MC needs no prior request:
     // none open -> unlinked, any open -> soldier picks one or "not for any".
@@ -404,12 +435,15 @@ async function handle(update) {
   }
 
   // Last step done. State is not advanced, so on failure the user can just retry the last step.
+  // A double tap on Submit would otherwise send twice; released after submit, or expires in 30s.
+  if (!(await redis('SET', `submit:${chat}`, 1, 'NX', 'EX', 30))) return;
   const sub = await submit(chat, s, update.message?.from ?? cb.from);
   if (!sub) {
+    await redis('DEL', `submit:${chat}`);
     s.ids.push((await send(chat, 'Failed to send to your commanders. Please try again.')).message_id);
     return save();
   }
-  await redis('DEL', key);
+  await redis('DEL', key, `submit:${chat}`);
   try {
     // Telegram can't delete messages older than 48h; those just stay.
     for (let i = 0; i < s.ids.length; i += 100) {

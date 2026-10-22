@@ -33,7 +33,10 @@ export function fakeBackend() {
     if (cmd === 'HGETALL') return { result: [...(b.store.get(key) ?? [])].flat() };
     if (cmd === 'EXPIRE') return { result: +b.store.has(key) };
     if (cmd === 'GET') return { result: b.store.get(key) ?? null };
-    if (cmd === 'SET') return b.store.set(key, val), { result: 'OK' };
+    if (cmd === 'SET') {
+      if (body.includes('NX') && b.store.has(key)) return { result: null };
+      return b.store.set(key, val), { result: 'OK' };
+    }
     if (cmd === 'DEL') return { result: body.slice(1).filter((k) => b.store.delete(k)).length };
     return { error: `unknown command ${cmd}` };
   };
@@ -70,8 +73,10 @@ export const groupText =(t) => ({ update_id: ++id, message: { message_id: ++id, 
 export const SICK_FLOW = [text('/start'), tap('rank:PTE'), text('Tan Ah Kow'), tap('type:sick'),
   text('Fever and sore throat'), text('Kranji Medical Centre'), text('0830'), tap('ack:yes'), tap('review:yes')];
 /** MC after an earlier request: its saved profile is reused. With an open grant, a link tap goes after the first 3. Add the file, then `SUBMIT`. */
-export const MC_FLOW = [text('/start'), tap('profile:yes'), tap('type:mc'),
+export const MC_FLOW = [text('/start'), tap('profile:yes'), tap('type:mc'), text('6ad8500b1d0ae72f026cfa75'),
   text('Sprained ankle, light duty'), text('10/10/2026'), text('12/10/2026')];
+/** Tomorrow in Singapore, a valid appointment date whenever the suite runs. */
+export const APPT_DAY = new Date(Date.now() + 864e5).toLocaleDateString('en-GB', { timeZone: 'Asia/Singapore' });
 export const SUBMIT = tap('review:yes');
 export const APPT_FLOW = [text('/start'), tap('rank:PTE'), text('Tan Ah Kow'), tap('type:appt'),
-  text('Eczema'), text('20/10/2026 1400'), text('SGH Dermatology'), photo(), tap('pledge:yes'), tap('review:yes')];
+  text('Eczema'), text(`${APPT_DAY} 1400`), text('SGH Dermatology'), photo(), tap('pledge:yes'), tap('review:yes')];
