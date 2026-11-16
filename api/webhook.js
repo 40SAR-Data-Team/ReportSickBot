@@ -70,11 +70,6 @@ export function parseDateTime(text, withTime) {
 const today0 = () => parseDateTime(today(), false);
 /** "DDMMYY" -> "DD/MM/20YY"; anything else is returned unchanged. */
 const ddmmyy = (t) => t.replace(/^(\d\d)(\d\d)(\d\d)$/, '$1/$2/20$3');
-/** Days / weeks since a DD/MM/YYYY date, e.g. "3 days", "2 weeks". */
-const ago = (date) => {
-  const d = (today0() - parseDateTime(date, false)) / 864e5;
-  return d < 7 ? `${d} day${d === 1 ? '' : 's'}` : `${Math.floor(d / 7)} week${d < 14 ? '' : 's'}`;
-};
 const YEAR = 366 * 86400e3;
 const WORDS = new Set(['condition', 'clinic', 'purpose', 'venue', 'reason']);
 /** Error message for a typed answer at `step` of form `s`, or null if valid. */
@@ -177,8 +172,7 @@ function buttons(sub, f) {
 /** Summary lines of a filled form, shown for review and sent to admins. */
 function details(s) {
   return {
-    sick: ['🤒 REQUEST TO REPORT SICK', who(s), `Medical Condition: ${s.condition}${['Left', 'Right', 'Both'].includes(s.body) ? ` (${s.body.toUpperCase()})` : ''}`,
-      s.onset && `Symptoms Since: ${ago(s.onset)}`, `Clinic: ${s.clinic}`, `Time: ${s.time}`, `✅ ${ACK}`],
+    sick: ['🤒 REQUEST TO REPORT SICK', who(s), `Medical Condition: ${s.condition}`, s.onset && `Symptoms since: ${s.onset}`, s.body && `Laterality: ${s.body}`, `Clinic: ${s.clinic}`, `Time: ${s.time}`, `✅ ${ACK}`],
     appt: ['🏥 REQUEST TO ATTEND MEDICAL APPOINTMENT', who(s), `Reason: ${s.purpose}`, `Time: ${s.when}`, `Clinic: ${s.venue}`, `✅ ${PLEDGE}`],
     mc: ['📄 MC / STATUS', who(s), s.grant && `For: ${s.grant.label}`, s.formsg && `FormSG Response ID: ${s.formsg}`,`Reason / Status: ${s.reason}`, `From ${s.start} to ${s.end}`],
   }[s.type].filter(Boolean);
@@ -420,7 +414,7 @@ async function handle(update) {
     const err = invalid(s.step, text, s);
     // ponytail: a 2nd bad Response ID skips the question instead of blocking the MC
     if (err && (s.step !== 'formsg' || (s.strikes = (s.strikes ?? 0) + 1) < 2)) return reply(s.step, err);
-    value = err ? '' : s.step === 'time' ? `${today()} ${text}` : ddmmyy(text);
+    value = err ? '' : s.step === 'time' ? `${today()} ${text}` : text;
   }
 
   s[s.step] = value;
