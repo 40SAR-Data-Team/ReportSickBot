@@ -1,7 +1,7 @@
 // Calls the handler directly with fetch mocked to the dummy backend.
 import { afterAll, beforeEach, expect, test } from 'bun:test';
 import handler, { today as day } from '../api/webhook.js';
-import { ADMINS, APPT_DAY, TOMORROW, APPT_FLOW, ENV, MC_FLOW, SICK_FLOW, USER, adminTap, SUBMIT, adminText, doc, fakeBackend, groupText, photo, tap, text } from './fake.js';
+import { ADMINS, APPT_DAY, TOMORROW, YESTERDAY, APPT_FLOW, ENV, MC_FLOW, SICK_FLOW, USER, adminTap, SUBMIT, adminText, doc, fakeBackend, groupText, photo, tap, text } from './fake.js';
 
 const realFetch = globalThis.fetch;
 let b;
@@ -541,7 +541,7 @@ test('/cancel clears the form; next message restarts', async () => {
   expect(b.toUser().at(-1)).toContain('What is your Rank?');
 });
 
-test.each([['sick', SICK_FLOW, 'Medical Condition: Fever and sore throat (LEFT)\nSymptoms Since: 1 day'], ['appt', APPT_FLOW, 'Clinic: SGH Dermatology']])(
+test.each([['sick', SICK_FLOW, `Symptoms since: ${YESTERDAY}\nLaterality: Left`], ['appt', APPT_FLOW, 'Clinic: SGH Dermatology']])(
   '%s flow: review shows the answers before anything reaches admins',
   async (_, flow, line) => {
     await sendAll(flow.slice(0, -1));
