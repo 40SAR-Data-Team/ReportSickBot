@@ -1,7 +1,7 @@
 // Calls the handler directly with fetch mocked to the dummy backend.
 import { afterAll, beforeEach, expect, test } from 'bun:test';
 import handler, { today as day } from '../api/webhook.js';
-import { ADMINS, APPT_DAY, APPT_FLOW, ENV, MC_FLOW, SICK_FLOW, USER, adminTap, SUBMIT, adminText, doc, fakeBackend, groupText, photo, tap, text } from './fake.js';
+import { ADMINS, APPT_DAY, TOMORROW, APPT_FLOW, ENV, MC_FLOW, SICK_FLOW, USER, adminTap, SUBMIT, adminText, doc, fakeBackend, groupText, photo, tap, text } from './fake.js';
 
 const realFetch = globalThis.fetch;
 let b;
@@ -55,7 +55,7 @@ test('sick flow sends the request to every admin', async () => {
 });
 
 test('submit deletes the whole form thread and leaves one summary', async () => {
-  const flow = [...SICK_FLOW.slice(0, 6), text('tomorrow'), ...SICK_FLOW.slice(6)];
+  const flow = [...SICK_FLOW.slice(0, 8), text('tomorrow'), ...SICK_FLOW.slice(8)];
   await sendAll(flow);
   const dels = b.calls.filter((c) => c.method === 'deleteMessages');
   expect(dels).toHaveLength(1);
@@ -410,7 +410,7 @@ test('ignores group chats', async () => {
 });
 
 test('invalid time is re-asked without advancing', async () => {
-  await sendAll(SICK_FLOW.slice(0, 6));
+  await sendAll(SICK_FLOW.slice(0, 8));
   await send(text('tomorrow morning'));
   expect(b.toUser().at(-1)).toContain('Invalid time');
   expect(JSON.parse(b.store.get('form:111')).step).toBe('time');
@@ -455,8 +455,9 @@ test('a command as an answer is re-asked', async () => {
 const reach = {
   name: () => sendAll(SICK_FLOW.slice(0, 2)),
   condition: () => sendAll(SICK_FLOW.slice(0, 4)),
-  clinic: () => sendAll(SICK_FLOW.slice(0, 5)),
-  time: () => sendAll(SICK_FLOW.slice(0, 6)),
+  onset: () => sendAll(SICK_FLOW.slice(0, 5)),
+  clinic: () => sendAll(SICK_FLOW.slice(0, 7)),
+  time: () => sendAll(SICK_FLOW.slice(0, 8)),
   purpose: () => sendAll(APPT_FLOW.slice(0, 4)),
   when: () => sendAll(APPT_FLOW.slice(0, 5)),
   venue: () => sendAll(APPT_FLOW.slice(0, 6)),
@@ -469,6 +470,10 @@ test.each([
   ['name', 'Tan123', 'letters only'],
   ['name', '/overview', 'Commands are not valid answers'],
   ['condition', '...', 'in words'],
+  ['onset', '151126x', 'Use DDMMYY'],
+  ['onset', '311126', 'Invalid date'],
+  ['onset', '010199', 'too far'],
+  ['onset', TOMORROW, 'cannot be in the future'],
   ['clinic', '123', 'in words'],
   ['time', '2500', 'Invalid time'],
   ['purpose', '/cancelled', 'Commands are not valid answers'],
@@ -536,7 +541,7 @@ test('/cancel clears the form; next message restarts', async () => {
   expect(b.toUser().at(-1)).toContain('What is your Rank?');
 });
 
-test.each([['sick', SICK_FLOW, 'Medical Condition: Fever and sore throat'], ['appt', APPT_FLOW, 'Clinic: SGH Dermatology']])(
+test.each([['sick', SICK_FLOW, 'Medical Condition: Fever and sore throat (LEFT)\nSymptoms Since: 1 day'], ['appt', APPT_FLOW, 'Clinic: SGH Dermatology']])(
   '%s flow: review shows the answers before anything reaches admins',
   async (_, flow, line) => {
     await sendAll(flow.slice(0, -1));
@@ -588,7 +593,8 @@ test('answers are trimmed; blank answers are re-asked', async () => {
 test.each([
   ['rank', () => send(text('/start')), photo, 'Please tap one of the buttons.'],
   ['type', () => sendAll(SICK_FLOW.slice(0, 3)), () => text('sick'), 'Please tap one of the buttons.'],
-  ['ack', () => sendAll(SICK_FLOW.slice(0, 7)), () => text('ok'), 'Please tap one of the buttons.'],
+  ['body', () => sendAll(SICK_FLOW.slice(0, 6)), () => text('left'), 'Please tap one of the buttons.'],
+  ['ack', () => sendAll(SICK_FLOW.slice(0, 9)), () => text('ok'), 'Please tap one of the buttons.'],
   ['shot', () => sendAll(APPT_FLOW.slice(0, 7)), () => text('attached'), 'Please send an image.'],
   ['shot', () => sendAll(APPT_FLOW.slice(0, 7)), () => doc('application/pdf'), 'Please send an image.'],
   ['review', () => sendAll(SICK_FLOW.slice(0, -1)), () => text('yes'), 'Please tap one of the buttons.'],

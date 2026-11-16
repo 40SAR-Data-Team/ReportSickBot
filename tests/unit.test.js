@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { invalid, parseDateTime } from '../api/webhook.js';
-import { APPT_DAY } from './fake.js';
+import { APPT_DAY, TOMORROW } from './fake.js';
 
 test('parseDateTime', () => {
   expect(parseDateTime('10/10/2026 0830', true)).toEqual(new Date(Date.UTC(2026, 9, 10, 8, 30)));
@@ -48,6 +48,11 @@ test.each([
   ['condition', '...', {}, 'in words'],
   ['condition', '38.5', {}, 'in words'],
   ['condition', 'Fever 38.5', {}, null],
+  ['onset', '151126x', {}, 'Use DDMMYY'],
+  ['onset', '15112', {}, 'Use DDMMYY'],
+  ['onset', '311126', {}, 'Invalid date'],
+  ['onset', TOMORROW, {}, 'cannot be in the future'],
+  ['onset', '010199', {}, 'too far'],
   ['clinic', 'Kranji Medical Centre', {}, null],
   ['purpose', '???', {}, 'in words'],
   ['venue', '42', {}, 'in words'],
