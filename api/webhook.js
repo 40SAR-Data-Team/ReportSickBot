@@ -26,7 +26,10 @@ const QUESTIONS = {
     [0, 3, 6].map((i) => RANKS.slice(i, i + 3).map((r) => btn(r, `rank:${r}`)))],
   name: ['What is your Name?'],
   type: ['How may I help you?', Object.entries(TYPES).map(([k, t]) => [btn(t, `type:${k}`)])],
-  condition: ['What symptoms are you experiencing?'],
+  condition: ['What symptoms are you experiencing? Please be as detailed as possible: what you feel, how severe, any fever / temperature, and anything else the doctor should know. (e.g. Fever 38.5, sore throat, cough, worse at night)'],
+  onset: ['Which date did you start experiencing these symptoms? (DDMMYY, estimate will do)'],
+  body: ['Which side of your body is experiencing these symptoms? (e.g. Rash on LEFT Hand, RIGHT Shin Pain)',
+    [['Left', 'Right', 'Both', 'NA'].map((v) => btn(v, `body:${v}`))]],
   clinic: ['Which clinic will you visit?'],
   time: ['What time will you visit the doctor? (24h format, e.g. 0830)'],
   ack: [`${ACK}.`, [[btn('✅ I acknowledge', 'ack:yes')]]],
@@ -47,11 +50,11 @@ const QUESTIONS = {
 };
 // rank -> name -> type, then the chosen type's steps; after the last step, submit.
 const FLOWS = {
-  sick: ['condition', 'clinic', 'time', 'ack', 'review'],
+  sick: ['condition', 'onset', 'body', 'clinic', 'time', 'ack', 'review'],
   appt: ['purpose', 'when', 'venue', 'shot', 'pledge', 'review'],
   mc: ['formsg', 'link', 'reason', 'start', 'end', 'file', 'review'],
 };
-const BUTTON_STEPS = new Set(['profile', 'rank', 'type', 'ack', 'pledge', 'link', 'review']);
+const BUTTON_STEPS = new Set(['profile', 'rank', 'type', 'body', 'ack', 'pledge', 'link', 'review']);
 
 /** Parses "DD/MM/YYYY" (or "DD/MM/YYYY HHMM" if withTime); returns a Date or null if invalid. */
 export function parseDateTime(text, withTime) {
@@ -65,6 +68,13 @@ export function parseDateTime(text, withTime) {
 
 /** Start of today in Singapore, on the same wall-clock-as-UTC scale as parseDateTime. */
 const today0 = () => parseDateTime(today(), false);
+/** "DDMMYY" -> "DD/MM/20YY"; anything else is returned unchanged. */
+const ddmmyy = (t) => t.replace(/^(\d\d)(\d\d)(\d\d)$/, '$1/$2/20$3');
+/** Days / weeks since a DD/MM/YYYY date, e.g. "3 days", "2 weeks". */
+const ago = (date) => {
+  const d = (today0() - parseDateTime(date, false)) / 864e5;
+  return d < 7 ? `${d} day${d === 1 ? '' : 's'}` : `${Math.floor(d / 7)} week${d < 14 ? '' : 's'}`;
+};
 const YEAR = 366 * 86400e3;
 const WORDS = new Set(['condition', 'clinic', 'purpose', 'venue', 'reason']);
 /** Error message for a typed answer at `step` of form `s`, or null if valid. */
@@ -83,10 +93,11 @@ export function invalid(step, text, s) {
     if (when < today0()) return 'The appointment cannot be in the past.';
     if (when - today0() > YEAR) return 'The appointment is too far ahead.';
   }
-  if (step !== 'start' && step !== 'end') return null;
-  const date = parseDateTime(text, false);
-  if (!date) return 'Invalid date. Use DD/MM/YYYY.';
+  if (step !== 'start' && step !== 'end' && step !== 'onset') return null;
+  const date = parseDateTime(ddmmyy(text), false);
+  if (!date) return step === 'onset' ? 'Invalid date. Use DDMMYY, e.g. 151126.' : 'Invalid date. Use DD/MM/YYYY.';
   if (Math.abs(date - today0()) > YEAR) return 'That date is too far from today.';
+  if (step === 'onset' && date > today0()) return 'The date cannot be in the future.';
   if (step === 'end' && date - parseDateTime(s.start, false) > YEAR) return 'MC / Status cannot be longer than a year.';
   if (step === 'end' && date < parseDateTime(s.start, false)) return 'End date cannot be before the start date.';
   if (step === 'start' && s.end && date > parseDateTime(s.end, false)) return 'Start date cannot be after the end date.';
@@ -166,7 +177,8 @@ function buttons(sub, f) {
 /** Summary lines of a filled form, shown for review and sent to admins. */
 function details(s) {
   return {
-    sick: ['🤒 REQUEST TO REPORT SICK', who(s), `Medical Condition: ${s.condition}`, `Clinic: ${s.clinic}`, `Time: ${s.time}`, `✅ ${ACK}`],
+    sick: ['🤒 REQUEST TO REPORT SICK', who(s), `Medical Condition: ${s.condition}${['Left', 'Right', 'Both'].includes(s.body) ? ` (${s.body.toUpperCase()})` : ''}`,
+      s.onset && `Symptoms Since: ${ago(s.onset)}`, `Clinic: ${s.clinic}`, `Time: ${s.time}`, `✅ ${ACK}`],
     appt: ['🏥 REQUEST TO ATTEND MEDICAL APPOINTMENT', who(s), `Reason: ${s.purpose}`, `Time: ${s.when}`, `Clinic: ${s.venue}`, `✅ ${PLEDGE}`],
     mc: ['📄 MC / STATUS', who(s), s.grant && `For: ${s.grant.label}`, s.formsg && `FormSG Response ID: ${s.formsg}`,`Reason / Status: ${s.reason}`, `From ${s.start} to ${s.end}`],
   }[s.type].filter(Boolean);
@@ -408,7 +420,7 @@ async function handle(update) {
     const err = invalid(s.step, text, s);
     // ponytail: a 2nd bad Response ID skips the question instead of blocking the MC
     if (err && (s.step !== 'formsg' || (s.strikes = (s.strikes ?? 0) + 1) < 2)) return reply(s.step, err);
-    value = err ? '' : s.step === 'time' ? `${today()} ${text}` : text;
+    value = err ? '' : s.step === 'time' ? `${today()} ${text}` : ddmmyy(text);
   }
 
   s[s.step] = value;

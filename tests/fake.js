@@ -70,8 +70,12 @@ export const adminText = (admin, t) => ({
 });
 export const groupText =(t) => ({ update_id: ++id, message: { message_id: ++id, chat: { id: -1, type: 'group' }, from: USER, text: t } });
 
+/** Yesterday in Singapore as DDMMYY, a valid symptom start date whenever the suite runs. */
+export const YESTERDAY = new Date(Date.now() - 864e5).toLocaleDateString('en-GB', { timeZone: 'Asia/Singapore' }).replace(/\/\d\d(\d\d)$/, '$1').replace(/\//g, '');
+/** Tomorrow as DDMMYY, a future symptom start date. */
+export const TOMORROW = new Date(Date.now() + 864e5).toLocaleDateString('en-GB', { timeZone: 'Asia/Singapore' }).replace(/\/\d\d(\d\d)$/, '$1').replace(/\//g, '');
 export const SICK_FLOW = [text('/start'), tap('rank:PTE'), text('Tan Ah Kow'), tap('type:sick'),
-  text('Fever and sore throat'), text('Kranji Medical Centre'), text('0830'), tap('ack:yes'), tap('review:yes')];
+  text('Fever and sore throat'), text(YESTERDAY), tap('body:Left'), text('Kranji Medical Centre'), text('0830'), tap('ack:yes'), tap('review:yes')];
 /** MC after an earlier request: its saved profile is reused. With an open grant, a link tap goes after the first 3. Add the file, then `SUBMIT`. */
 export const MC_FLOW = [text('/start'), tap('profile:yes'), tap('type:mc'), text('6ad8500b1d0ae72f026cfa75'),
   text('Sprained ankle, light duty'), text('10/10/2026'), text('12/10/2026')];
