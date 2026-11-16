@@ -27,7 +27,7 @@ const QUESTIONS = {
   name: ['What is your Name?'],
   type: ['How may I help you?', Object.entries(TYPES).map(([k, t]) => [btn(t, `type:${k}`)])],
   condition: ['What symptoms are you experiencing? Please be as detailed as possible: what you feel, how severe, any fever / temperature, and anything else the doctor should know. (e.g. Fever 38.5, sore throat, cough, worse at night)'],
-  onset: ['Which date did you start experiencing these symptoms? (DDMMYY, estimate will do)'],
+  onset: ['When did you start experiencing these symptoms? (DDMMYY)'],
   body: ['Which side of your body is experiencing these symptoms? (e.g. Rash on LEFT Hand, RIGHT Shin Pain)',
     [['Left', 'Right', 'Both', 'NA'].map((v) => btn(v, `body:${v}`))]],
   clinic: ['Which clinic will you visit?'],
