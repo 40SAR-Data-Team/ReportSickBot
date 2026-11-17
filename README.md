@@ -65,7 +65,7 @@ Nothing to install. Tests use dummy data and never touch real Telegram or Upstas
 - `tests/integration.test.js`: calls `handle` directly with `fetch` mocked to the in-memory fake in `tests/fake.js`. Add new behaviour tests here.
 - `tests/e2e.test.js`: real HTTP to the webhook, with Telegram and Upstash replaced by a local dummy server (`TELEGRAM_API` overrides the API base).
 
-CI (`.github/workflows/test.yml`) runs `bun test` with coverage and uploads to Codecov. Add the repo on codecov.io and set the `CODECOV_TOKEN` repo secret.
+CI (`.github/workflows/test.yml`) runs `bun test` on every push and pull request.
 
 Use `bun`, not `npm` / `npx`.
 
