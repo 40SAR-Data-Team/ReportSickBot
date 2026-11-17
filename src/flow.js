@@ -1,0 +1,136 @@
+import { adminName } from './admins.js';
+import { decide, finishReject, overview } from './admin.js';
+import { TYPES, UNLINKED, WEEK, replyTo } from './consts.js';
+import { today } from './dates.js';
+import { BUTTON_STEPS, FLOWS, ask, blank } from './form.js';
+import { hput, json, redis } from './store.js';
+import { grants, linkTo, log, submit } from './submissions.js';
+import { send, tg } from './telegram.js';
+import { invalid } from './validate.js';
+
+export async function handle(update) {
+  const cb = update.callback_query;
+  const msg = update.message ?? cb?.message;
+  if (msg?.chat.type !== 'private') return;
+  const chat = msg.chat.id;
+  const key = `form:${chat}`;
+  let text = update.message?.text?.trim();
+  const admin = adminName((update.message ?? cb).from.id);
+  if (cb) await tg('answerCallbackQuery', { callback_query_id: cb.id });
+  if (/^(approve|reject|rejskip|rejcancel|seen|batsys):/.test(cb?.data)) return decide(cb, admin);
+  if (admin && text === '/overview') return overview(chat);
+  if (admin && text && !text.startsWith('/') && await finishReject(chat, admin, text)) return;
+
+  if (text === '/start' || text === '/cancel') {
+    await redis('DEL', key, `rej:${chat}`);
+    if (text === '/cancel') return send(chat, 'Cancelled. Send /start to begin again.');
+  }
+
+  let s = await json('GET', key);
+  // "Send MC / Status" under an approval: a fresh MC form already linked to that request
+  const mcforId = cb?.data?.startsWith('mcfor:') && cb.data.slice(6);
+  const mcfor = mcforId && (await grants(chat)).find(([id]) => id === mcforId);
+  if (mcforId && !mcfor) {
+    return send(chat, 'This request already has an MC / Status, or it has expired.');
+  }
+  const fresh = !s;
+  if (mcfor) s = { step: 'formsg', type: 'mc', ...linkTo(mcfor) };
+  else if (!s) s = await blank(chat);
+  // Every message in the form (both sides) is tracked, then deleted on submit.
+  s.ids ??= [];
+  if (update.message) s.ids.push(update.message.message_id);
+  const save = () => redis('SET', key, JSON.stringify(s), 'EX', 3600);
+  const reply = async (step, prefix) => { s.ids.push((await ask(chat, step, prefix, s)).message_id); return save(); };
+  if (mcfor) return reply('formsg', `For: ${s.grant.label}`);
+  if (fresh) return cb ? undefined : reply(s.step); // tap on a submitted / expired form: ignore
+  if (cb?.data === 'today' && s.step === 'start') text = today();
+
+  let value, picked;
+  if (BUTTON_STEPS.has(s.step)) {
+    const [step, v] = cb?.data?.split(':') ?? [];
+    if (step !== s.step) return cb ? undefined : reply(s.step, 'Please tap one of the buttons.'); // stale tap: ignore
+    picked = step === 'link' && s.grants.find(([id]) => id === v);
+    if (step === 'link' && !picked && v !== 'none') return;
+    value = v;
+    const label = {
+      type: TYPES[v], ack: 'Acknowledged', pledge: 'Acknowledged', profile: v === 'yes' ? 'Yes' : 'Change',
+      link: picked ? picked[1].label : UNLINKED, review: v === 'yes' ? 'Submit' : 'Start over',
+    }[step] ?? v;
+    await tg('editMessageText', { chat_id: chat, message_id: cb.message.message_id, text: `${cb.message.text}\n\n✔ ${label}` });
+    if (step === 'review' && v === 'no') {
+      // new form, but keep the old messages so the submit cleanup removes them too
+      s = { ...(await blank(chat)), ids: s.ids };
+      return reply(s.step);
+    }
+  } else if (cb && !text) {
+    return; // stale tap on an old keyboard
+  } else if (s.step === 'file' || s.step === 'shot') {
+    const m = update.message;
+    const mime = m.document?.mime_type ?? '';
+    const ok = m.photo || mime.startsWith('image/') || (s.step === 'file' && mime === 'application/pdf');
+    if (!ok) return reply(s.step, s.step === 'file' ? 'Please send a photo or a PDF.' : 'Please send an image.');
+    value = m.message_id;
+    s.caption = m.caption;
+  } else {
+    const err = invalid(s.step, text, s);
+    // ponytail: a 2nd bad Response ID skips the question instead of blocking the MC
+    if (err && (s.step !== 'formsg' || (s.strikes = (s.strikes ?? 0) + 1) < 2)) return reply(s.step, err);
+    value = err ? '' : s.step === 'time' ? `${today()} ${text}` : text;
+  }
+
+  s[s.step] = value;
+  const flow = ['rank', 'name', 'type', ...(FLOWS[s.type] ?? [])];
+  let next = flow[flow.indexOf(s.step) + 1]; // profile isn't in the flow, so "Change" goes to rank
+  let prefix;
+  if (s.step === 'profile' && value === 'yes') next = 'type';
+  if (s.step === 'link' && value === 'none') delete s.link;
+  else if (s.step === 'link') {
+    Object.assign(s, linkTo(picked));
+    prefix = `For: ${s.grant.label}`;
+  }
+  if (next === 'link' && s.link) next = 'reason'; // already linked via the approval's button
+  if (next === 'link') {
+    // Some soldiers report sick without the app, so an MC needs no prior request:
+    // none open -> unlinked, any open -> soldier picks one or "not for any".
+    const open = await grants(chat);
+    if (open.length) s.grants = open;
+    else next = 'reason';
+  }
+  if (next) {
+    s.step = next;
+    return reply(next, prefix);
+  }
+
+  // Last step done. State is not advanced, so on failure the user can just retry the last step.
+  // A double tap on Submit would otherwise send twice; released after submit, or expires in 30s.
+  if (!(await redis('SET', `submit:${chat}`, 1, 'NX', 'EX', 30))) return;
+  const sub = await submit(chat, s, update.message?.from ?? cb.from);
+  if (!sub) {
+    await redis('DEL', `submit:${chat}`);
+    s.ids.push((await send(chat, 'Failed to send to your commanders. Please try again.')).message_id);
+    return save();
+  }
+  await redis('DEL', key, `submit:${chat}`);
+  try {
+    // Telegram can't delete messages older than 48h; those just stay.
+    for (let i = 0; i < s.ids.length; i += 100) {
+      await tg('deleteMessages', { chat_id: chat, message_ids: s.ids.slice(i, i + 100) });
+    }
+  } catch (e) {
+    console.error('cleanup:', e);
+  }
+  const sent = await send(chat, `${sub.text}\n\nSubmitted ✅`, { reply_parameters: replyTo(s.grant?.summary) });
+  sub.summary = sent.message_id;
+  sub.day = today();
+  sub.at = new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Singapore', hour: '2-digit', minute: '2-digit' });
+  // ponytail: buttons go dead after 7 days, raise EXPIRE if admins act later
+  await hput(`sub:${sub.id}`, 'data', JSON.stringify(sub), WEEK);
+  await log(sub, {});
+  await redis('SET', `profile:${chat}`, JSON.stringify({ rank: s.rank, name: s.name }));
+  if (s.link) {
+    // one MC per request; mark the request's /overview row so it leaves "Awaiting MC"
+    await redis('HDEL', `grant:${chat}`, s.link);
+    const row = await redis('HGET', `day:${s.grant.day}`, s.link);
+    if (row) await redis('HSET', `day:${s.grant.day}`, s.link, JSON.stringify({ ...JSON.parse(row), mc: true }));
+  }
+}
