@@ -326,7 +326,7 @@ test('appointment flow sends summary + screenshot; approve updates copies and te
 
 test('/overview shows counts, who is waiting, and each status, for admins only', async () => {
   await approveSick(ADMINS[1]); // approved, then MC sent
-  await linkedMc()
+  await linkedMc();
   await sendAll([photo(), SUBMIT]);
   await sendAll([text('/start'), tap('profile:yes'), ...SICK_FLOW.slice(3)]); // rejected
   await send(adminTap(ADMINS[0], keys(ADMINS[0])[1].callback_data));
