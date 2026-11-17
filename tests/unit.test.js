@@ -33,6 +33,7 @@ test.each([
 // [step, answer, form state, expected error substring, or null if valid]
 test.each([
   ['name', '', {}, 'type your answer'],
+  ['yippe', '', {}, 'type your answer'],
   ['name', '/start', {}, 'Commands'],
   ['condition', '/start fever', {}, 'Commands'],
   ['clinic', 'x'.repeat(501), {}, 'under 500'],
