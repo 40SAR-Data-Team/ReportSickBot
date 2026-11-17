@@ -26,6 +26,9 @@ test.each([
   ['10/10/2026 2359', true, Date.UTC(2026, 9, 10, 23, 59)],
   ['10/10/2026 2400', true, null],
   ['10/10/2026 830', true, null],
+  ['15/06/2026', false, Date.UTC(2026, 5, 15)],
+  ['29/02/2028', false, Date.UTC(2028, 1, 29)],
+  ['25/12/2026 09:30', true, Date.UTC(2026, 11, 25, 9, 30)],
 ])('parseDateTime(%p, %p)', (text, withTime, ms) => {
   expect(parseDateTime(text, withTime)?.getTime() ?? null).toBe(ms);
 });
@@ -78,6 +81,9 @@ test.each([
   ['end', '09/10/2026', { start: '10/10/2026' }, 'before the start'],
   ['end', '10/10/2026', { start: '10/10/2026' }, null],
   ['end', '31/02/2026', { start: '10/10/2026' }, 'Invalid date'],
+  ['name', 'John Tan', {}, null],
+  ['condition', 'Headache and fever', {}, null],
+  ['formsg', 'abcdef123456789012345678', {}, null],
 ])('invalid(%p, %p)', (step, text, s, err) => {
   if (err) expect(invalid(step, text, s)).toContain(err);
   else expect(invalid(step, text, s)).toBeNull();
