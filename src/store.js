@@ -1,3 +1,10 @@
+/**
+ * Runs one Upstash Redis command over REST.
+ *
+ * @param {...(string|number)} cmd Command and arguments, e.g. 'GET', key.
+ * @return {Promise<*>} The command result.
+ * @throws {Error} If Redis returns an error.
+ */
 export async function redis(...cmd) {
   const r = await fetch(process.env.KV_REST_API_URL, {
     method: 'POST',
@@ -15,8 +22,10 @@ export async function hash(key) {
   const flat = (await redis('HGETALL', key)) ?? [];
   return Object.fromEntries(Array.from({ length: flat.length / 2 }, (_, i) => flat.slice(2 * i, 2 * i + 2)));
 }
-/** HSET plus a TTL on the whole hash. */
+/** Stores `value` as JSON at `key`, with a TTL in seconds if given. */
+export const put = (key, value, ttl) => redis('SET', key, JSON.stringify(value), ...(ttl ? ['EX', ttl] : []));
+/** HSET of a JSON value plus a TTL on the whole hash. */
 export async function hput(key, field, value, ttl) {
-  await redis('HSET', key, field, value);
+  await redis('HSET', key, field, JSON.stringify(value));
   await redis('EXPIRE', key, ttl);
 }

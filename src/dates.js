@@ -1,6 +1,12 @@
 /** Today's date in Singapore as DD/MM/YYYY. */
 export const today = () => new Date().toLocaleDateString('en-GB', { timeZone: 'Asia/Singapore' });
-/** Parses "DD/MM/YYYY" (or "DD/MM/YYYY HHMM" if withTime); returns a Date or null if invalid. */
+/**
+ * Parses "DD/MM/YYYY", or "DD/MM/YYYY HHMM" when `withTime`.
+ *
+ * @param {string} text Input to parse.
+ * @param {boolean} withTime Whether a time part is required (and only then allowed).
+ * @return {Date|null} UTC wall-clock date, or null if malformed or not a real date.
+ */
 export function parseDateTime(text, withTime) {
   const m = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?: (\d{2}):?(\d{2}))?$/);
   if (!m || withTime !== (m[4] !== undefined)) return null;
@@ -10,8 +16,12 @@ export function parseDateTime(text, withTime) {
   return valid ? date : null;
 }
 
+/** Current time in Singapore as HH:MM. */
+export const now = () => new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Singapore', hour: '2-digit', minute: '2-digit' });
+
 /** Start of today in Singapore, on the same wall-clock-as-UTC scale as parseDateTime. */
 export const today0 = () => parseDateTime(today(), false);
 /** "DDMMYY" -> "DD/MM/20YY"; anything else is returned unchanged. */
 export const ddmmyy = (t) => t.replace(/^(\d\d)(\d\d)(\d\d)$/, '$1/$2/20$3');
+/** One year in milliseconds, the cap for how far a date may sit from today. */
 export const YEAR = 366 * 86400e3;
