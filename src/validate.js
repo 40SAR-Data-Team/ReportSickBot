@@ -1,8 +1,16 @@
 import { EG } from './consts.js';
 import { ddmmyy, parseDateTime, today, today0, YEAR } from './dates.js';
 
+/** Free-text steps that must contain letters. */
 const WORDS = new Set(['condition', 'clinic', 'purpose', 'venue', 'reason']);
-/** Error message for a typed answer at `step` of form `s`, or null if valid. */
+/**
+ * Validates a typed answer.
+ *
+ * @param {string} step Form step being answered.
+ * @param {string} text Trimmed user input.
+ * @param {object} s Form state so far (for start/end cross-checks).
+ * @return {string|null} Error message to show the user, or null if valid.
+ */
 export function invalid(step, text, s) {
   if (!text) return 'Please type your answer.';
   if (text.startsWith('/')) return 'Commands are not valid answers. Send /start to restart, or /cancel to stop.';
@@ -23,8 +31,11 @@ export function invalid(step, text, s) {
   if (!date) return step === 'onset' ? 'Invalid date. Use DDMMYY, e.g. 151126.' : 'Invalid date. Use DD/MM/YYYY.';
   if (Math.abs(date - today0()) > YEAR) return 'That date is too far from today.';
   if (step === 'onset' && date > today0()) return 'The date cannot be in the future.';
-  if (step === 'end' && date - parseDateTime(s.start, false) > YEAR) return 'MC / Status cannot be longer than a year.';
-  if (step === 'end' && date < parseDateTime(s.start, false)) return 'End date cannot be before the start date.';
+  if (step === 'end') {
+    const start = parseDateTime(s.start, false);
+    if (date - start > YEAR) return 'MC / Status cannot be longer than a year.';
+    if (date < start) return 'End date cannot be before the start date.';
+  }
   if (step === 'start' && s.end && date > parseDateTime(s.end, false)) return 'Start date cannot be after the end date.';
   return null;
 }

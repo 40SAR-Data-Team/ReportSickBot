@@ -1,13 +1,19 @@
 import { adminName } from './admins.js';
 import { decide, finishReject, overview } from './admin.js';
-import { TYPES, UNLINKED, WEEK, replyTo } from './consts.js';
-import { today } from './dates.js';
+import { ADMIN_ACTIONS, TYPES, UNLINKED, WEEK, replyTo } from './consts.js';
+import { now, today } from './dates.js';
 import { BUTTON_STEPS, FLOWS, ask, blank } from './form.js';
-import { hput, json, redis } from './store.js';
+import { hput, json, put, redis } from './store.js';
 import { grants, linkTo, log, submit } from './submissions.js';
-import { send, tg } from './telegram.js';
+import { edit, send, tg } from './telegram.js';
 import { invalid } from './validate.js';
 
+/**
+ * Handles one Telegram update: admin commands and buttons, otherwise the soldier's form.
+ * Each answer advances the form saved in Redis; the last one submits to the admins.
+ *
+ * @param {object} update Telegram update.
+ */
 export async function handle(update) {
   const cb = update.callback_query;
   const msg = update.message ?? cb?.message;
@@ -17,7 +23,7 @@ export async function handle(update) {
   let text = update.message?.text?.trim();
   const admin = adminName((update.message ?? cb).from.id);
   if (cb) await tg('answerCallbackQuery', { callback_query_id: cb.id });
-  if (/^(approve|reject|rejskip|rejcancel|seen|batsys):/.test(cb?.data)) return decide(cb, admin);
+  if (ADMIN_ACTIONS.includes(cb?.data?.split(':')[0])) return decide(cb, admin);
   if (admin && text === '/overview') return overview(chat);
   if (admin && text && !text.startsWith('/') && await finishReject(chat, admin, text)) return;
 
@@ -39,7 +45,7 @@ export async function handle(update) {
   // Every message in the form (both sides) is tracked, then deleted on submit.
   s.ids ??= [];
   if (update.message) s.ids.push(update.message.message_id);
-  const save = () => redis('SET', key, JSON.stringify(s), 'EX', 3600);
+  const save = () => put(key, s, 3600);
   const reply = async (step, prefix) => { s.ids.push((await ask(chat, step, prefix, s)).message_id); return save(); };
   if (mcfor) return reply('formsg', `For: ${s.grant.label}`);
   if (fresh) return cb ? undefined : reply(s.step); // tap on a submitted / expired form: ignore
@@ -52,11 +58,7 @@ export async function handle(update) {
     picked = step === 'link' && s.grants.find(([id]) => id === v);
     if (step === 'link' && !picked && v !== 'none') return;
     value = v;
-    const label = {
-      type: TYPES[v], ack: 'Acknowledged', pledge: 'Acknowledged', profile: v === 'yes' ? 'Yes' : 'Change',
-      link: picked ? picked[1].label : UNLINKED, review: v === 'yes' ? 'Submit' : 'Start over',
-    }[step] ?? v;
-    await tg('editMessageText', { chat_id: chat, message_id: cb.message.message_id, text: `${cb.message.text}\n\n✔ ${label}` });
+    await edit(chat, cb.message.message_id, `${cb.message.text}\n\n✔ ${buttonLabel(step, v, picked)}`);
     if (step === 'review' && v === 'no') {
       // new form, but keep the old messages so the submit cleanup removes them too
       s = { ...(await blank(chat)), ids: s.ids };
@@ -66,9 +68,7 @@ export async function handle(update) {
     return; // stale tap on an old keyboard
   } else if (s.step === 'file' || s.step === 'shot') {
     const m = update.message;
-    const mime = m.document?.mime_type ?? '';
-    const ok = m.photo || mime.startsWith('image/') || (s.step === 'file' && mime === 'application/pdf');
-    if (!ok) return reply(s.step, s.step === 'file' ? 'Please send a photo or a PDF.' : 'Please send an image.');
+    if (!validFile(m, s.step)) return reply(s.step, s.step === 'file' ? 'Please send a photo or a PDF.' : 'Please send an image.');
     value = m.message_id;
     s.caption = m.caption;
   } else {
@@ -110,6 +110,11 @@ export async function handle(update) {
     s.ids.push((await send(chat, 'Failed to send to your commanders. Please try again.')).message_id);
     return save();
   }
+  return complete(chat, key, s, sub);
+}
+
+/** Sends the soldier a summary, deletes the form messages and records the submission. */
+async function complete(chat, key, s, sub) {
   await redis('DEL', key, `submit:${chat}`);
   try {
     // Telegram can't delete messages older than 48h; those just stay.
@@ -122,15 +127,27 @@ export async function handle(update) {
   const sent = await send(chat, `${sub.text}\n\nSubmitted ✅`, { reply_parameters: replyTo(s.grant?.summary) });
   sub.summary = sent.message_id;
   sub.day = today();
-  sub.at = new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Singapore', hour: '2-digit', minute: '2-digit' });
+  sub.at = now();
   // ponytail: buttons go dead after 7 days, raise EXPIRE if admins act later
-  await hput(`sub:${sub.id}`, 'data', JSON.stringify(sub), WEEK);
+  await hput(`sub:${sub.id}`, 'data', sub, WEEK);
   await log(sub, {});
-  await redis('SET', `profile:${chat}`, JSON.stringify({ rank: s.rank, name: s.name }));
+  await put(`profile:${chat}`, { rank: s.rank, name: s.name });
   if (s.link) {
     // one MC per request; mark the request's /overview row so it leaves "Awaiting MC"
     await redis('HDEL', `grant:${chat}`, s.link);
     const row = await redis('HGET', `day:${s.grant.day}`, s.link);
     if (row) await redis('HSET', `day:${s.grant.day}`, s.link, JSON.stringify({ ...JSON.parse(row), mc: true }));
   }
+}
+
+/** Label echoed under a tapped button. */
+const buttonLabel = (step, v, picked) => ({
+  type: TYPES[v], ack: 'Acknowledged', pledge: 'Acknowledged', profile: v === 'yes' ? 'Yes' : 'Change',
+  link: picked ? picked[1].label : UNLINKED, review: v === 'yes' ? 'Submit' : 'Start over',
+}[step] ?? v);
+
+/** Whether message `m` carries an acceptable attachment for `step` (a PDF only for 'file'). */
+function validFile(m, step) {
+  const mime = m.document?.mime_type ?? '';
+  return m.photo || mime.startsWith('image/') || (step === 'file' && mime === 'application/pdf');
 }

@@ -3,7 +3,7 @@ import { today } from './dates.js';
 import { json } from './store.js';
 import { send } from './telegram.js';
 
-// step -> [question, inline keyboard?], or a function of the form state returning that
+/** Step -> [question text, inline keyboard?, send options?], or a function of the form state returning that. */
 const QUESTIONS = {
   profile: (s) => [`Continue as ${who(s)}?`, [[btn('✅ Yes', 'profile:yes'), btn('Change', 'profile:no')]]],
   rank: ['What is your Rank?',
@@ -32,14 +32,24 @@ const QUESTIONS = {
   review: (s) => [`Please check your details:\n\n${details(s).join('\n')}`,
     [[btn('✅ Submit', 'review:yes'), btn('🔄 Start over', 'review:no')]]],
 };
-// rank -> name -> type, then the chosen type's steps; after the last step, submit.
+/** Steps asked per request type after rank, name and type. After the last step, submit. */
 export const FLOWS = {
   sick: ['condition', 'onset', 'body', 'clinic', 'time', 'ack', 'review'],
   appt: ['purpose', 'when', 'venue', 'shot', 'pledge', 'review'],
   mc: ['formsg', 'link', 'reason', 'start', 'end', 'file', 'review'],
 };
+/** Steps answered by tapping a button instead of typing. */
 export const BUTTON_STEPS = new Set(['profile', 'rank', 'type', 'body', 'ack', 'pledge', 'link', 'review']);
 
+/**
+ * Sends the question for `step`.
+ *
+ * @param {number} chat Chat id.
+ * @param {string} step Step to ask.
+ * @param {string=} prefix Text shown above the question, e.g. an error.
+ * @param {object} s Form state, for questions that depend on it.
+ * @return {Promise<object>} The sent Telegram message.
+ */
 export function ask(chat, step, prefix, s) {
   const q = QUESTIONS[step];
   const [text, keyboard, extra] = typeof q === 'function' ? q(s) : q;
