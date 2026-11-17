@@ -326,7 +326,7 @@ test('appointment flow sends summary + screenshot; approve updates copies and te
 
 test('/overview shows counts, who is waiting, and each status, for admins only', async () => {
   await approveSick(ADMINS[1]); // approved, then MC sent
-  await linkedMc();
+  await linkedMc()
   await sendAll([photo(), SUBMIT]);
   await sendAll([text('/start'), tap('profile:yes'), ...SICK_FLOW.slice(3)]); // rejected
   await send(adminTap(ADMINS[0], keys(ADMINS[0])[1].callback_data));
@@ -712,4 +712,25 @@ test('an admin tapping a button on their own request is told why', async () => {
   b.store.set('sub:own', new Map([['data', JSON.stringify({ id: 'own', user: ADMINS[0], type: 'sick', msgs: [] })]]));
   await send(adminTap(ADMINS[0], 'approve:own'));
   expect(b.toAdmin(ADMINS[0]).at(-1).text).toContain('cannot act on your own request');
+});
+
+test('Admin A taps approve but Admin B taps decline at the same time', async () => {
+  const [A, B] = ADMINS;
+  await sendAll(SICK_FLOW);
+  const [approve, reject] = keys(B);
+  const id = reject.callback_data.split(':')[1];
+  await send(adminTap(B, reject.callback_data)); // B opens the reason prompt
+  await Promise.all([
+    send(adminTap(A, approve.callback_data)),
+    send(adminTap(B, `rejskip:${id}`)),
+  ]); //race to see which taps wins / which request gets sent first
+  const decided = JSON.parse(b.store.get(`sub:${id}`).get('decided'));
+  const told = b.toUser().filter((t) => t.startsWith('✅ Approved') || t.includes('has rejected'));
+  expect(told).toHaveLength(1); // the soldier gets exactly one decision
+  if (decided.v === 'approved') {
+    expect(b.toAdmin(B).at(-1).text).toBe('[For Admin] Already approved by Admin A');
+  } else {
+    expect(decided.by).toBe('Admin B');
+    expect(b.store.has('grant:111')).toBe(false); // no MC button for a rejected request
+  }
 });
