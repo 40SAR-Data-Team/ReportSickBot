@@ -733,4 +733,24 @@ test('Admin A taps approve but Admin B taps decline at the same time', async () 
     expect(decided.by).toBe('Admin B');
     expect(b.store.has('grant:111')).toBe(false); // no MC button for a rejected request
   }
+
+test('user starts the form and selects a rank', async () => {
+  // User starts the bot
+  await send(text('/start'));
+
+  // Check that the bot asks for rank
+  expect(b.toUser().at(-1)).toBe('What is your Rank?');
+
+  // User selects PTE
+  await send(tap('rank:PTE'));
+
+  // Check that the bot asks for name
+  expect(b.toUser().at(-1)).toBe('What is your Name?');
+
+  // Check that the backend saved the rank
+  expect(JSON.parse(b.store.get('form:111')))
+    .toMatchObject({
+      step: 'name',
+      rank: 'PTE'
+    });
 });
