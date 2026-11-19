@@ -64,3 +64,10 @@ test('MC for the approved request reaches the admins over HTTP', async () => {
   expect(file.method).toBe('copyMessage');
   expect(b.store.has('form:111')).toBe(false);
 });
+
+
+test('accepts a valid HTTP request', async () => {
+  const response = await post(SICK_FLOW[0]);
+
+  expect(response.status).toBe(200);
+});
