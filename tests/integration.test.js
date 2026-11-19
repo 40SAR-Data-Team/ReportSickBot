@@ -1,5 +1,5 @@
 // Calls the handler directly with fetch mocked to the dummy backend.
-import { afterAll, beforeEach, expect, test } from 'bun:test';
+import { afterAll, beforeEach, expect, setSystemTime, test } from 'bun:test';
 import handler from '../api/webhook.js';
 import { today as day } from '../src/dates.js';
 import health from '../api/health.js';
@@ -624,3 +624,86 @@ test.each([
   expect(status).toBe(503);
   expect(body).toMatchObject({ ok: false, [part]: false });
 });
+
+// --- concurrency ---
+test('two admins approving at once: exactly one wins', async () => {
+  await sendAll(SICK_FLOW);
+  const approve = keys(ADMINS[0])[0].callback_data;
+  await Promise.all(ADMINS.map((a) => send(adminTap(a, approve))));
+  expect(b.toUser().filter((t) => t.startsWith('✅ Approved by'))).toHaveLength(1);
+  expect(b.store.get('grant:111').size).toBe(1);
+});
+
+test('two Submit taps at once send one request', async () => {
+  await sendAll(SICK_FLOW.slice(0, -1));
+  await Promise.all([send(SUBMIT), send(SUBMIT)]);
+  expect(posts(ADMINS[0])).toHaveLength(1);
+});
+
+// --- stress ---
+test("max-length answers and reason keep every message under Telegram's 4096 limit", async () => {
+  const long = 'a'.repeat(500);
+  await sendAll([text('/start'), tap('rank:PTE'), text('x'.repeat(60)), tap('type:sick'), text(long), text(YESTERDAY),
+    tap('body:Left'), text(long), text('0830'), tap('ack:yes'), SUBMIT]);
+  await send(adminTap(ADMINS[0], keys(ADMINS[0])[1].callback_data));
+  await send(adminText(ADMINS[0], long));
+  expect(lastToUser().text).toContain(`Reason: ${long}`);
+  expect(Math.max(...b.calls.filter((c) => c.text).map((c) => c.text.length))).toBeLessThan(4096);
+});
+
+test('a long form thread is deleted in batches of 100', async () => {
+  await sendAll([text('/start'), tap('rank:PTE'), ...Array.from({ length: 60 }, () => text('123')), ...SICK_FLOW.slice(2)]);
+  const dels = b.calls.filter((c) => c.method === 'deleteMessages').map((c) => c.message_ids.length);
+  expect(dels).toHaveLength(2);
+  expect(dels[0]).toBe(100);
+});
+
+// --- partial failures ---
+test('a failed message cleanup still completes the submit', async () => {
+  const respond = b.respond;
+  b.respond = (url, body) => (url.endsWith('/deleteMessages') ? { ok: false, description: 'too old' } : respond(url, body));
+  await sendAll(SICK_FLOW);
+  expect(b.toUser().at(-1)).toEndWith('Submitted ✅');
+  expect(b.store.has('form:111')).toBe(false);
+});
+
+test('an admin copy that fails to update does not block the decision', async () => {
+  await sendAll(SICK_FLOW);
+  b.failFor.add(ADMINS[0]);
+  await send(adminTap(ADMINS[1], keys(ADMINS[1])[0].callback_data));
+  expect(edits().find((e) => e.chat_id === ADMINS[1]).text).toEndWith('✅ Approved by Admin B');
+  expect(lastToUser().text).toStartWith('✅ Approved by Admin B');
+  expect(b.store.get('grant:111').size).toBe(1);
+});
+
+// --- time ---
+test('an approved request is no longer offered for an MC after its week', async () => {
+  await approveSick();
+  setSystemTime(new Date(Date.now() + 8 * 864e5));
+  try {
+    await sendAll(MC_FLOW.slice(0, 4));
+    expect(b.toUser().at(-1)).toBe('What new status are you given / What is your reason for MC?');
+  } finally {
+    setSystemTime();
+  }
+});
+
+// --- authorization / forged input ---
+test("a soldier cannot use another soldier's Send MC button", async () => {
+  await approveSick();
+  const mcfor = lastToUser().reply_markup.inline_keyboard[0][0].callback_data;
+  await send(adminTap(222, mcfor)); // non-admin 222 in their own chat
+  expect(b.calls.findLast((c) => c.chat_id === 222).text).toBe('This request already has an MC / Status, or it has expired.');
+  expect(b.store.has('form:222')).toBe(false);
+});
+
+test.each([['rank', [text('/start')], 'rank:GEN'], ['type', SICK_FLOW.slice(0, 3), 'type:hack']])(
+  'a forged %s button is ignored',
+  async (step, setup, data) => {
+    await sendAll(setup);
+    const before = b.calls.length;
+    await send(tap(data));
+    expect(b.calls.slice(before).map((c) => c.method)).toEqual(['answerCallbackQuery']);
+    expect(JSON.parse(b.store.get('form:111')).step).toBe(step);
+  },
+);
