@@ -1,11 +1,10 @@
-import { adminName } from './admins.js';
 import { decide, finishReject, overview } from './admin.js';
-import { ADMIN_ACTIONS, TYPES, UNLINKED, WEEK, replyTo } from './consts.js';
-import { now, today } from './dates.js';
-import { BUTTON_STEPS, FLOWS, ask, blank } from './form.js';
+import { ADMIN_ACTIONS, WEEK, replyTo } from './consts.js';
+import { today } from './dates.js';
+import { BUTTON_STEPS, FLOWS, TYPES, UNLINKED, ask, blank } from './form.js';
 import { hput, json, put, redis } from './store.js';
 import { grants, linkTo, log, submit } from './submissions.js';
-import { edit, send, tg } from './telegram.js';
+import { adminName, edit, send, tg } from './telegram.js';
 import { invalid } from './validate.js';
 
 /**
@@ -68,7 +67,8 @@ export async function handle(update) {
     return; // stale tap on an old keyboard
   } else if (s.step === 'file' || s.step === 'shot') {
     const m = update.message;
-    if (!validFile(m, s.step)) return reply(s.step, s.step === 'file' ? 'Please send a photo or a PDF.' : 'Please send an image.');
+    const mime = m.document?.mime_type ?? ''; // a PDF only for 'file'
+    if (!(m.photo || mime.startsWith('image/') || (s.step === 'file' && mime === 'application/pdf'))) return reply(s.step, s.step === 'file' ? 'Please send a photo or a PDF.' : 'Please send an image.');
     value = m.message_id;
     s.caption = m.caption;
   } else {
@@ -127,7 +127,7 @@ async function complete(chat, key, s, sub) {
   const sent = await send(chat, `${sub.text}\n\nSubmitted ✅`, { reply_parameters: replyTo(s.grant?.summary) });
   sub.summary = sent.message_id;
   sub.day = today();
-  sub.at = now();
+  sub.at = new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Singapore', hour: '2-digit', minute: '2-digit' });
   // ponytail: buttons go dead after 7 days, raise EXPIRE if admins act later
   await hput(`sub:${sub.id}`, 'data', sub, WEEK);
   await log(sub, {});
@@ -145,9 +145,3 @@ const buttonLabel = (step, v, picked) => ({
   type: TYPES[v], ack: 'Acknowledged', pledge: 'Acknowledged', profile: v === 'yes' ? 'Yes' : 'Change',
   link: picked ? picked[1].label : UNLINKED, review: v === 'yes' ? 'Submit' : 'Start over',
 }[step] ?? v);
-
-/** Whether message `m` carries an acceptable attachment for `step` (a PDF only for 'file'). */
-function validFile(m, step) {
-  const mime = m.document?.mime_type ?? '';
-  return m.photo || mime.startsWith('image/') || (step === 'file' && mime === 'application/pdf');
-}

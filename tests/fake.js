@@ -1,4 +1,4 @@
-// Dummy Telegram + Upstash backend and update builders shared by integration and e2e tests.
+// Dummy Telegram + Upstash backend and update builders shared by the tests.
 
 export const ADMINS = [901, 902];
 export const USER = { id: 111, username: 'pte_tan' };

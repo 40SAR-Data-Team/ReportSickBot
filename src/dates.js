@@ -15,13 +15,3 @@ export function parseDateTime(text, withTime) {
   const valid = date.getUTCDate() === d && date.getUTCMonth() === mo - 1 && h < 24 && mi < 60;
   return valid ? date : null;
 }
-
-/** Current time in Singapore as HH:MM. */
-export const now = () => new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Singapore', hour: '2-digit', minute: '2-digit' });
-
-/** Start of today in Singapore, on the same wall-clock-as-UTC scale as parseDateTime. */
-export const today0 = () => parseDateTime(today(), false);
-/** "DDMMYY" -> "DD/MM/20YY"; anything else is returned unchanged. */
-export const ddmmyy = (t) => t.replace(/^(\d\d)(\d\d)(\d\d)$/, '$1/$2/20$3');
-/** One year in milliseconds, the cap for how far a date may sit from today. */
-export const YEAR = 366 * 86400e3;
