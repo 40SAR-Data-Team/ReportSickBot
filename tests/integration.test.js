@@ -713,3 +713,25 @@ test('an admin tapping a button on their own request is told why', async () => {
   await send(adminTap(ADMINS[0], 'approve:own'));
   expect(b.toAdmin(ADMINS[0]).at(-1).text).toContain('cannot act on your own request');
 });
+
+
+test('user starts the form and selects a rank', async () => {
+  // User starts the bot
+  await send(text('/start'));
+
+  // Check that the bot asks for rank
+  expect(b.toUser().at(-1)).toBe('What is your Rank?');
+
+  // User selects PTE
+  await send(tap('rank:PTE'));
+
+  // Check that the bot asks for name
+  expect(b.toUser().at(-1)).toBe('What is your Name?');
+
+  // Check that the backend saved the rank
+  expect(JSON.parse(b.store.get('form:111')))
+    .toMatchObject({
+      step: 'name',
+      rank: 'PTE'
+    });
+});
