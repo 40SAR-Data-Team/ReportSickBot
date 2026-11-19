@@ -59,6 +59,9 @@ export const FLOWS = {
 /** Steps answered by tapping a button instead of typing. */
 export const BUTTON_STEPS = new Set(['profile', 'rank', 'type', 'body', 'ack', 'pledge', 'link', 'review']);
 
+/** [text, keyboard?, send options?] of the question for `step`, given form state `s`. */
+export const question = (step, s) => (typeof QUESTIONS[step] === 'function' ? QUESTIONS[step](s) : QUESTIONS[step]);
+
 /**
  * Sends the question for `step`.
  *
@@ -69,8 +72,7 @@ export const BUTTON_STEPS = new Set(['profile', 'rank', 'type', 'body', 'ack', '
  * @return {Promise<object>} The sent Telegram message.
  */
 export function ask(chat, step, prefix, s) {
-  const q = QUESTIONS[step];
-  const [text, keyboard, extra] = typeof q === 'function' ? q(s) : q;
+  const [text, keyboard, extra] = question(step, s);
   return send(chat, prefix ? `${prefix}\n\n${text}` : text, { reply_markup: keyboard && { inline_keyboard: keyboard }, ...extra });
 }
 

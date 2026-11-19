@@ -1,7 +1,7 @@
 import { decide, finishReject, overview } from './admin.js';
 import { ADMIN_ACTIONS, WEEK, replyTo } from './consts.js';
 import { today } from './dates.js';
-import { BUTTON_STEPS, FLOWS, TYPES, UNLINKED, ask, blank } from './form.js';
+import { BUTTON_STEPS, FLOWS, TYPES, UNLINKED, ask, blank, question } from './form.js';
 import { hput, json, put, redis } from './store.js';
 import { grants, linkTo, log, submit } from './submissions.js';
 import { adminName, edit, send, tg } from './telegram.js';
@@ -54,8 +54,9 @@ export async function handle(update) {
   if (BUTTON_STEPS.has(s.step)) {
     const [step, v] = cb?.data?.split(':') ?? [];
     if (step !== s.step) return cb ? undefined : reply(s.step, 'Please tap one of the buttons.'); // stale tap: ignore
+    // forged callback data (e.g. rank:GEN, type:hack): only buttons this question offers count
+    if (!question(step, s)[1].flat().some((k) => k.callback_data === cb.data)) return;
     picked = step === 'link' && s.grants.find(([id]) => id === v);
-    if (step === 'link' && !picked && v !== 'none') return;
     value = v;
     await edit(chat, cb.message.message_id, `${cb.message.text}\n\n✔ ${buttonLabel(step, v, picked)}`);
     if (step === 'review' && v === 'no') {

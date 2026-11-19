@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
-import { parseDateTime } from '../src/dates.js';
+import { expect, setSystemTime, test } from 'bun:test';
+import { parseDateTime, today } from '../src/dates.js';
 import { invalid } from '../src/validate.js';
 import { APPT_DAY, TOMORROW } from './fake.js';
 
@@ -66,4 +66,25 @@ test.each([
 ])('invalid(%p, %p)', (step, text, s, err) => {
   if (err) expect(invalid(step, text, s)).toContain(err);
   else expect(invalid(step, text, s)).toBeNull();
+});
+
+test('today() rolls over at Singapore midnight, not UTC', () => {
+  try {
+    setSystemTime(new Date('2026-11-19T15:59:00Z'));
+    expect(today()).toBe('19/11/2026');
+    setSystemTime(new Date('2026-11-19T16:00:00Z'));
+    expect(today()).toBe('20/11/2026');
+  } finally {
+    setSystemTime();
+  }
+});
+
+test('fuzz: random input never throws', () => {
+  const chars = '0123456789/: aZ-.';
+  const steps = ['name', 'condition', 'onset', 'time', 'when', 'start', 'end', 'formsg'];
+  for (let i = 0; i < 2000; i++) {
+    const t = Array.from({ length: Math.random() * 20 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+    expect(() => parseDateTime(t, i % 2 === 0)).not.toThrow();
+    for (const step of steps) expect(() => invalid(step, t, { start: '10/10/2026', end: '12/10/2026' })).not.toThrow();
+  }
 });
