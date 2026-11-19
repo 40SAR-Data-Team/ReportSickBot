@@ -82,9 +82,10 @@ test('today() rolls over at Singapore midnight, not UTC', () => {
 test('fuzz: random input never throws', () => {
   const chars = '0123456789/: aZ-.';
   const steps = ['name', 'condition', 'onset', 'time', 'when', 'start', 'end', 'formsg'];
+  // a throw fails the test by itself; no expect() per call (18k of them blew the 5s test timeout)
   for (let i = 0; i < 2000; i++) {
     const t = Array.from({ length: Math.random() * 20 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-    expect(() => parseDateTime(t, i % 2 === 0)).not.toThrow();
-    for (const step of steps) expect(() => invalid(step, t, { start: '10/10/2026', end: '12/10/2026' })).not.toThrow();
+    parseDateTime(t, i % 2 === 0);
+    for (const step of steps) invalid(step, t, { start: '10/10/2026', end: '12/10/2026' });
   }
 });
