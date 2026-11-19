@@ -1,9 +1,8 @@
-import { admins } from './admins.js';
-import { FOR_ADMIN, GRANT_KEY_TTL, WEEK, btn, replyTo, who } from './consts.js';
-import { parseDateTime } from './dates.js';
+import { WEEK, btn, replyTo, who } from './consts.js';
+import { parseDateTime, today } from './dates.js';
 import { details } from './form.js';
-import { hash, hput, redis } from './store.js';
-import { edit, send, tg, toAdmin } from './telegram.js';
+import { hash, hput, pairs, redis } from './store.js';
+import { FOR_ADMIN, admins, edit, send, tg, toAdmin } from './telegram.js';
 
 /**
  * Lists a soldier's open grants: approved requests still awaiting an MC / Status.
@@ -17,12 +16,12 @@ export async function grants(chat) {
 /** Form state fields that link an MC to the grant `[id, g]`. */
 export const linkTo = ([id, g]) => ({ link: id, grant: g, rank: g.rank, name: g.name });
 
-/** The decision on a submission as {v, by, reason}, or undefined if still open. */
-const decided = (f) => f.decided && JSON.parse(f.decided);
-
-/** Outcome lines of a submission, from its claimed fields. The soldier's copy leaves out the BatSys tick. */
-function outcome(f, soldier) {
-  const d = decided(f);
+/**
+ * Outcome lines of a submission, from its claimed fields (`decided` parsed to {v, by, reason?}) or an /overview row.
+ * The soldier's copy leaves out the BatSys tick.
+ */
+export function outcome(f, soldier) {
+  const d = f.decided;
   return [
     d && (d.v === 'approved' ? `✅ Approved by ${d.by}` : `❌ Rejected by ${d.by}${d.reason ? `\nReason: ${d.reason}` : ''}`),
     f.seen && `👍 Acknowledged by ${f.seen}`,
@@ -35,7 +34,7 @@ export function buttons(sub, f) {
   const batsys = f.batsys ? [] : [btn('Added to BatSys?', `batsys:${sub.id}`)];
   if (sub.type === 'mc') return f.seen ? batsys : [btn('👍 Acknowledge', `seen:${sub.id}`)];
   if (!f.decided) return [btn('✅ Approve', `approve:${sub.id}`), btn('❌ Reject', `reject:${sub.id}`)];
-  return decided(f).v === 'approved' ? batsys : [];
+  return f.decided.v === 'approved' ? batsys : [];
 }
 
 /**
@@ -45,12 +44,19 @@ export function buttons(sub, f) {
  * @param {object} s Completed form state.
  * @param {object} from Telegram user who sent the form.
  * @return {Promise<object|null>} The submission with `msgs` [adminChat, messageId], or null if no admin received it.
+ * @throws {Error} If Redis fails; nothing is committed, so the caller lets the soldier retry.
  */
 export async function submit(chat, s, from) {
   const lines = details(s);
   lines.push(`Sent by: ${from.username ? `@${from.username}` : `user id ${from.id}`}`);
   const kind = { sick: 'sick request', appt: `medical appointment ${s.when}`, mc: `MC ${s.start} to ${s.end}` }[s.type];
-  const sub = { id: crypto.randomUUID(), user: chat, type: s.type, text: lines.join('\n'), label: `${who(s)}, ${kind}`, kind, rank: s.rank, name: s.name, when: s.when };
+  const sub = {
+    id: crypto.randomUUID(), user: chat, type: s.type, text: lines.join('\n'), label: `${who(s)}, ${kind}`, kind, rank: s.rank, name: s.name, when: s.when,
+    day: today(), at: new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Singapore', hour: '2-digit', minute: '2-digit' }), msgs: [],
+  };
+  // saved before any admin sees a button, so no button ever points at a missing submission
+  // ponytail: buttons go dead after 7 days, raise WEEK if admins act later
+  await hput(`sub:${sub.id}`, 'data', sub, WEEK);
   const file = s.file ?? s.shot;
   const list = admins();
   const results = await Promise.allSettled(list.map(async ([, admin]) => {
@@ -79,43 +85,58 @@ export async function submit(chat, s, from) {
  * @param {object} f Its claimed fields (decided, seen, batsys).
  */
 export async function log(sub, f) {
-  const d = decided(f);
+  const d = f.decided; // the reject reason stays out of the day list
   const row = { at: sub.at, type: sub.type, label: sub.label, decided: d && { v: d.v, by: d.by }, seen: f.seen, batsys: f.batsys };
   // outlives the 7-day sub, so a late tap still updates an existing day list
   await hput(`day:${sub.day}`, sub.id, row, WEEK + 86400);
 }
 
+// Runs inside Redis as one atomic command: no other client can act between the existence check,
+// the claim and the read-back, so the state returned is exactly the state this claim produced.
+// The existence check stops HSETNX from recreating an expired submission as a TTL-less key.
+const CLAIM = `if redis.call('HEXISTS', KEYS[1], 'data') == 0 then return nil end
+local won = redis.call('HSETNX', KEYS[1], ARGV[1], ARGV[2])
+return {won, redis.call('HGETALL', KEYS[1])}`;
+
 /**
- * First tap wins: claims `field` on the submission, then refreshes every admin copy and the soldier's summary,
- * and replies `notify` to the soldier (a new message push-notifies; edits don't). No `notify`: the soldier's chat is left alone.
+ * First tap wins: atomically claims `field` on the submission, in one round trip.
  *
  * @param {string} id Submission id.
  * @param {string} field Field to claim: decided, seen or batsys.
  * @param {string} value Value to store, usually the admin's name.
+ * @return {Promise<?{won: boolean, sub: object, f: object}>} Null if expired; else the stored state right after the claim.
+ */
+export async function claim(id, field, value) {
+  const r = await redis('EVAL', CLAIM, 1, `sub:${id}`, field, value);
+  if (!r) return null;
+  const f = pairs(r[1]);
+  f.decided &&= JSON.parse(f.decided);
+  return { won: r[0] === 1, sub: JSON.parse(f.data), f };
+}
+
+/**
+ * Tasks that show a won claim: every admin copy, the /overview row and, with `notify`, the soldier's summary plus
+ * a new message (a new message push-notifies; edits don't). No `notify`: the soldier's chat is left alone.
+ * Returned unawaited so the caller runs them in one parallel batch with its own tasks.
+ *
+ * @param {{sub: object, f: object}} c A won claim.
  * @param {string=} notify Message for the soldier.
  * @param {object=} markup reply_markup for `notify`.
- * @return {Promise<object|null>} The submission, or null if taken / expired.
+ * @param {Function=} after Runs once `notify` is sent, to keep a follow-up message below it.
+ * @return {Array<Promise>}
  */
-export async function apply(id, field, value, notify, markup) {
-  const key = `sub:${id}`;
-  // HSETNX is atomic: a second tap, or two admins tapping at once, gets 0.
-  if (!(await redis('HGET', key, 'data')) || !(await redis('HSETNX', key, field, value))) return null;
-  const f = await hash(key);
-  const sub = JSON.parse(f.data);
+export function broadcast({ sub, f }, notify, markup, after) {
   const body = `${sub.text}\n\n${outcome(f).join('\n')}`;
   const open = buttons(sub, f);
   const reply_markup = open.length ? { inline_keyboard: [open] } : undefined; // omitted: keyboard removed
-  const soldier = notify ? [
-    edit(sub.user, sub.summary, `${sub.text}\n\n${outcome(f, true).join('\n')}`),
-    send(sub.user, notify, { reply_to_message_id: sub.summary, reply_markup: markup }),
-  ] : [];
-  const results = await Promise.allSettled([
+  return [
     ...sub.msgs.map(([chat_id, message_id]) => edit(chat_id, message_id, `${FOR_ADMIN} ${body}`, { reply_markup })),
-    ...soldier,
     log(sub, f),
-  ]);
-  results.forEach((r) => r.status === 'rejected' && console.error('apply:', r.reason));
-  return sub;
+    ...(notify ? [
+      edit(sub.user, sub.summary, `${sub.text}\n\n${outcome(f, true).join('\n')}`),
+      send(sub.user, notify, { reply_to_message_id: sub.summary, reply_markup: markup }).then(after),
+    ] : []),
+  ];
 }
 
 /**
@@ -130,6 +151,6 @@ export async function grant(sub) {
     rank: sub.rank, name: sub.name, summary: sub.summary, msgs: sub.msgs, day: sub.day, until: from + WEEK * 1000,
     label: `${sub.type === 'appt' ? '🏥' : '🤒'} ${sub.day.slice(0, 5)} ${sub.at} ${sub.kind}`,
   };
-  // ponytail: fixed key TTL, expired fields are filtered by `until`; per-field HEXPIRE if it grows
-  await hput(`grant:${sub.user}`, sub.id, g, GRANT_KEY_TTL);
+  // ponytail: fixed 1-year key TTL as a janitor, expired fields are filtered by `until`; per-field HEXPIRE if it grows
+  await hput(`grant:${sub.user}`, sub.id, g, 365 * 86400);
 }

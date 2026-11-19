@@ -1,4 +1,4 @@
-// Dummy Telegram + Upstash backend and update builders shared by integration and e2e tests.
+// Dummy Telegram + Upstash backend and update builders shared by the tests.
 
 export const ADMINS = [901, 902];
 export const USER = { id: 111, username: 'pte_tan' };
@@ -19,10 +19,22 @@ export function fakeBackend() {
       const call = { method, ...body };
       b.calls.push(call);
       if (b.failFor.has(body.chat_id)) return { ok: false, description: 'dummy failure' };
-      call.result = method === 'sendMessage' || method === 'copyMessage' ? { message_id: ++b.nextId } : true;
+      call.result = method === 'sendMessage' || method === 'copyMessage' ? { message_id: ++b.nextId }
+        : method === 'getWebhookInfo' ? { url: 'https://dummy/api/webhook', pending_update_count: 0, ...b.webhookInfo } : true;
       return { ok: true, result: call.result };
     }
+    if (url.endsWith('/pipeline')) return body.map((c) => b.respond('', c)); // Upstash: one request, commands in order
     const [cmd, key, val, val2] = body;
+    if (cmd === 'PING') return { result: 'PONG' };
+    if (cmd === 'EVAL') {
+      // emulates only CLAIM in src/submissions.js: ['EVAL', script, 1, key, field, value]
+      const [, , , k, field, value] = body;
+      if (!b.store.get(k)?.has('data')) return { result: null };
+      const won = b.store.get(k).has(field) ? 0 : (b.store.set(k, new Map(b.store.get(k)).set(field, value)), 1);
+      return { result: [won, [...b.store.get(k)].flat()] };
+    }
+    // failOn = [cmd, n]: the n-th `cmd` from now fails once, like a Redis blip
+    if (b.failOn?.[0] === cmd && --b.failOn[1] === 0) return { error: 'dummy down' };
     if (cmd === 'HSET') return b.store.set(key, new Map(b.store.get(key)).set(val, val2)), { result: 1 };
     if (cmd === 'HSETNX') {
       if (b.store.get(key)?.has(val)) return { result: 0 };

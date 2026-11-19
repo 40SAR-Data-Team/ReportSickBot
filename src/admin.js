@@ -1,8 +1,9 @@
-import { EG, FOR_ADMIN, FORM, HTML, SUB_ACTIONS, btn, replyTo } from './consts.js';
+import { HTML, SUB_ACTIONS, btn, replyTo, settle } from './consts.js';
 import { today } from './dates.js';
+import { EG, FORM } from './form.js';
 import { hash, json, put, redis } from './store.js';
-import { apply, buttons, grant } from './submissions.js';
-import { edit, send, toAdmin } from './telegram.js';
+import { broadcast, buttons, claim, grant, outcome } from './submissions.js';
+import { FOR_ADMIN, edit, send, tg, toAdmin } from './telegram.js';
 
 /** [type, heading] of each overview section. */
 const SECTIONS = [['sick', '🤒 Report sick'], ['appt', '🏥 Medical appointment'], ['mc', '📄 MC / Status']];
@@ -14,11 +15,7 @@ export async function overview(chat) {
   const day = today();
   const rows = Object.values(await hash(`day:${day}`)).map((v) => JSON.parse(v)).sort((a, b) => a.at.localeCompare(b.at));
   const state = (r) => (r.type === 'mc' ? r.seen && 'seen' : r.decided?.v) || 'wait';
-  const status = (r) => [
-    r.type === 'mc' ? (r.seen ? `👍 acknowledged by ${r.seen}` : '⏳ not yet acknowledged')
-      : r.decided ? `${ICONS[r.decided.v]} ${r.decided.v} by ${r.decided.by}` : '⏳ waiting',
-    r.batsys && `✅ BatSys by ${r.batsys}`,
-  ].filter(Boolean).join(' · ');
+  const status = (r) => outcome(r).join(' · ') || (r.type === 'mc' ? '⏳ not yet acknowledged' : '⏳ waiting');
   const list = (title, rs, more) => `${title}\n${rs.map((r) => `${r.at} ${r.label}${more ? ` – ${more(r)}` : ''}`).join('\n') || 'None'}`;
   const counts = SECTIONS.map(([type, title]) => {
     const rs = rows.filter((r) => r.type === type);
@@ -69,56 +66,53 @@ export async function finishReject(chat, name, reason, id) {
   }
   await redis('DEL', `rej:${chat}`);
   const notify = `❌ ${name} has rejected your request.${reason ? `\nReason: ${reason}` : ''}\n\nSend /start to submit a new request.`;
-  const sub = await apply(p.id, 'decided', JSON.stringify({ v: 'rejected', by: name, reason }), notify);
-  const d = !sub && await json('HGET', `sub:${p.id}`, 'decided');
-  const text = sub ? '✔ Rejection sent' : d ? `Already ${d.v} by ${d.by}` : 'This request has expired.';
-  await edit(chat, p.prompt, `${FOR_ADMIN} ${text}`);
+  const c = await claim(p.id, 'decided', JSON.stringify({ v: 'rejected', by: name, reason }));
+  const text = !c ? 'This request has expired.' : c.won ? '✔ Rejection sent' : `Already ${c.f.decided.v} by ${c.f.decided.by}`;
+  // the prompt's edit is the admin's confirmation, sent only after the claim is stored; listed last so it lands last
+  await settle([...(c?.won ? broadcast(c, notify) : []), edit(chat, p.prompt, `${FOR_ADMIN} ${text}`)]);
   return true;
 }
 
-/**
- * Checks that a button tap is still valid.
- *
- * @param {number} chat Admin's chat id.
- * @param {string} id Submission id.
- * @param {string} action Button action.
- * @return {Promise<boolean|string>} 'own' for an admin acting on their own submission, false for a stale / replayed tap, else true.
- */
-async function allowed(chat, id, action) {
-  const f = await hash(`sub:${id}`);
-  if (!f.data) return true; // expired: apply / askReason say so
-  const sub = JSON.parse(f.data);
-  if (sub.user === chat) return 'own';
-  return buttons(sub, f).some((b) => b.callback_data === `${action}:${id}`);
-}
+/** Popup on the admin's tap once their claim is stored. */
+const DONE = { approve: '✅ Approved', seen: '👍 Acknowledged', batsys: '✅ Added to BatSys' };
 
 /**
- * Handles an admin button tap on a submission or a reject prompt.
+ * Handles an admin button tap on a submission or a reject prompt. The tap is answered (spinner stopped, popup shown)
+ * only after its claim is stored in Redis, so a popup always means the database has it.
  *
  * @param {object} cb Telegram callback_query.
  * @param {?string} name Admin's name; no-op if not an admin.
  */
 export async function decide(cb, name) {
-  if (!name) return;
+  const answer = (text) => tg('answerCallbackQuery', { callback_query_id: cb.id, text });
+  if (!name) return answer();
   const [action, id] = cb.data.split(':');
   const chat = cb.message.chat.id;
-  if (SUB_ACTIONS.includes(action)) {
-    const ok = await allowed(chat, id, action);
-    if (ok === 'own') return toAdmin(chat, 'You cannot act on your own request. Another admin must.');
-    if (!ok) return;
+  const f = SUB_ACTIONS.includes(action) && await hash(`sub:${id}`);
+  if (f?.data) { // expired: claim / askReason say so
+    const sub = JSON.parse(f.data);
+    f.decided &&= JSON.parse(f.decided);
+    if (sub.user === chat) return answer('You cannot act on your own request. Another admin must.');
+    if (!buttons(sub, f).some((b) => b.callback_data === cb.data)) return answer(); // stale / replayed tap
   }
-  if (action === 'reject') return askReason(chat, id, cb.message.message_id);
-  if (action === 'rejskip') return finishReject(chat, name, null, id);
+  if (action === 'reject') return settle([answer(), askReason(chat, id, cb.message.message_id)]);
+  if (action === 'rejskip') return settle([answer(), finishReject(chat, name, null, id)]);
   if (action === 'rejcancel') {
     if ((await json('GET', `rej:${chat}`))?.id === id) await redis('DEL', `rej:${chat}`);
-    return edit(chat, cb.message.message_id, `${FOR_ADMIN} Rejection cancelled.`);
+    return settle([answer(), edit(chat, cb.message.message_id, `${FOR_ADMIN} Rejection cancelled.`)]);
   }
+  const field = action === 'approve' ? 'decided' : action;
+  const c = await claim(id, field, action === 'approve' ? JSON.stringify({ v: 'approved', by: name }) : name);
+  if (!c) return answer('This request has expired.');
+  if (!c.won) return answer(field === 'decided' ? `Already ${c.f.decided.v} by ${c.f.decided.by}` : `Already done by ${c.f[field]}`);
+  let tasks;
   if (action === 'approve') {
-    const notify = `✅ Approved by ${name}\n\nAfter your visit, tap below to send your MC / Status.`;
-    const sub = await apply(id, 'decided', JSON.stringify({ v: 'approved', by: name }), notify,
-      { inline_keyboard: [[btn('📄 Send MC / Status', `mcfor:${id}`)]] });
-    if (sub?.type === 'sick') await send(sub.user, `Reminder: After visiting the doctor, complete the ${FORM}, and keep the FormSG's Response ID e.g. ${EG}`, HTML);
-    return sub && grant(sub);
+    const reminder = c.sub.type === 'sick' && (() => send(c.sub.user, `Reminder: After visiting the doctor, complete the ${FORM}, and keep the FormSG's Response ID e.g. ${EG}`, HTML));
+    tasks = [...broadcast(c, `✅ Approved by ${name}\n\nAfter your visit, tap below to send your MC / Status.`,
+      { inline_keyboard: [[btn('📄 Send MC / Status', `mcfor:${id}`)]] }, reminder || undefined), grant(c.sub)];
+  } else {
+    tasks = broadcast(c, action === 'seen' && `👍 Acknowledged by ${name}`);
   }
-  return apply(id, action, name, action === 'seen' && `👍 Acknowledged by ${name}`);
+  // one parallel batch: the popup plus every follow-up (copies, soldier, /overview row, grant)
+  return settle([answer(DONE[action]), ...tasks]);
 }

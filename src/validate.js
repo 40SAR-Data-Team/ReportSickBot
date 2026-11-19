@@ -1,5 +1,10 @@
-import { EG } from './consts.js';
-import { ddmmyy, parseDateTime, today, today0, YEAR } from './dates.js';
+import { parseDateTime, today } from './dates.js';
+import { EG } from './form.js';
+
+/** One year in milliseconds, the cap for how far a date may sit from today. */
+const YEAR = 366 * 86400e3;
+/** Start of today in Singapore, on the same wall-clock-as-UTC scale as parseDateTime. */
+const today0 = () => parseDateTime(today(), false);
 
 /** Free-text steps that must contain letters. */
 const WORDS = new Set(['condition', 'clinic', 'purpose', 'venue', 'reason']);
@@ -27,7 +32,7 @@ export function invalid(step, text, s) {
     if (when - today0() > YEAR) return 'The appointment is too far ahead.';
   }
   if (step !== 'start' && step !== 'end' && step !== 'onset') return null;
-  const date = parseDateTime(ddmmyy(text), false);
+  const date = parseDateTime(text.replace(/^(\d\d)(\d\d)(\d\d)$/, '$1/$2/20$3'), false); // onset is DDMMYY
   if (!date) return step === 'onset' ? 'Invalid date. Use DDMMYY, e.g. 151126.' : 'Invalid date. Use DD/MM/YYYY.';
   if (Math.abs(date - today0()) > YEAR) return 'That date is too far from today.';
   if (step === 'onset' && date > today0()) return 'The date cannot be in the future.';

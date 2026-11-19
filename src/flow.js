@@ -1,11 +1,10 @@
-import { adminName } from './admins.js';
 import { decide, finishReject, overview } from './admin.js';
-import { ADMIN_ACTIONS, TYPES, UNLINKED, WEEK, replyTo } from './consts.js';
-import { now, today } from './dates.js';
-import { BUTTON_STEPS, FLOWS, ask, blank } from './form.js';
+import { ADMIN_ACTIONS, WEEK, replyTo } from './consts.js';
+import { today } from './dates.js';
+import { BUTTON_STEPS, FLOWS, TYPES, UNLINKED, ask, blank, question } from './form.js';
 import { hput, json, put, redis } from './store.js';
 import { grants, linkTo, log, submit } from './submissions.js';
-import { edit, send, tg } from './telegram.js';
+import { adminName, edit, send, tg } from './telegram.js';
 import { invalid } from './validate.js';
 
 /**
@@ -22,8 +21,9 @@ export async function handle(update) {
   const key = `form:${chat}`;
   let text = update.message?.text?.trim();
   const admin = adminName((update.message ?? cb).from.id);
-  if (cb) await tg('answerCallbackQuery', { callback_query_id: cb.id });
+  // admin taps are answered by decide, after their claim is stored; soldier taps right away
   if (ADMIN_ACTIONS.includes(cb?.data?.split(':')[0])) return decide(cb, admin);
+  if (cb) await tg('answerCallbackQuery', { callback_query_id: cb.id });
   if (admin && text === '/overview') return overview(chat);
   if (admin && text && !text.startsWith('/') && await finishReject(chat, admin, text)) return;
 
@@ -55,8 +55,9 @@ export async function handle(update) {
   if (BUTTON_STEPS.has(s.step)) {
     const [step, v] = cb?.data?.split(':') ?? [];
     if (step !== s.step) return cb ? undefined : reply(s.step, 'Please tap one of the buttons.'); // stale tap: ignore
+    // forged callback data (e.g. rank:GEN, type:hack): only buttons this question offers count
+    if (!question(step, s)[1].flat().some((k) => k.callback_data === cb.data)) return;
     picked = step === 'link' && s.grants.find(([id]) => id === v);
-    if (step === 'link' && !picked && v !== 'none') return;
     value = v;
     await edit(chat, cb.message.message_id, `${cb.message.text}\n\n✔ ${buttonLabel(step, v, picked)}`);
     if (step === 'review' && v === 'no') {
@@ -68,7 +69,8 @@ export async function handle(update) {
     return; // stale tap on an old keyboard
   } else if (s.step === 'file' || s.step === 'shot') {
     const m = update.message;
-    if (!validFile(m, s.step)) return reply(s.step, s.step === 'file' ? 'Please send a photo or a PDF.' : 'Please send an image.');
+    const mime = m.document?.mime_type ?? ''; // a PDF only for 'file'
+    if (!(m.photo || mime.startsWith('image/') || (s.step === 'file' && mime === 'application/pdf'))) return reply(s.step, s.step === 'file' ? 'Please send a photo or a PDF.' : 'Please send an image.');
     value = m.message_id;
     s.caption = m.caption;
   } else {
@@ -101,34 +103,27 @@ export async function handle(update) {
     return reply(next, prefix);
   }
 
-  // Last step done. State is not advanced, so on failure the user can just retry the last step.
-  // A double tap on Submit would otherwise send twice; released after submit, or expires in 30s.
+  // Last step done. A double tap on Submit would otherwise send twice; released below, or expires in 30s.
   if (!(await redis('SET', `submit:${chat}`, 1, 'NX', 'EX', 30))) return;
-  const sub = await submit(chat, s, update.message?.from ?? cb.from);
-  if (!sub) {
-    await redis('DEL', `submit:${chat}`);
-    s.ids.push((await send(chat, 'Failed to send to your commanders. Please try again.')).message_id);
-    return save();
+  try {
+    const sub = await submit(chat, s, update.message?.from ?? cb.from);
+    if (sub) return await complete(chat, key, s, sub);
+  } catch (e) {
+    console.error('submit:', e);
   }
-  return complete(chat, key, s, sub);
+  // Not committed: the form stays at review, so Submit again retries (admins may get a duplicate, never nothing).
+  await redis('DEL', `submit:${chat}`);
+  s.ids.push((await send(chat, 'Failed to send to your commanders. Please try again.')).message_id);
+  return save();
 }
 
-/** Sends the soldier a summary, deletes the form messages and records the submission. */
+/**
+ * Records a sent submission, then deletes the form. Every step before that DEL is safe to redo,
+ * so a failure anywhere earlier is retried by the soldier; only cosmetic cleanup comes after it.
+ */
 async function complete(chat, key, s, sub) {
-  await redis('DEL', key, `submit:${chat}`);
-  try {
-    // Telegram can't delete messages older than 48h; those just stay.
-    for (let i = 0; i < s.ids.length; i += 100) {
-      await tg('deleteMessages', { chat_id: chat, message_ids: s.ids.slice(i, i + 100) });
-    }
-  } catch (e) {
-    console.error('cleanup:', e);
-  }
   const sent = await send(chat, `${sub.text}\n\nSubmitted ✅`, { reply_parameters: replyTo(s.grant?.summary) });
   sub.summary = sent.message_id;
-  sub.day = today();
-  sub.at = now();
-  // ponytail: buttons go dead after 7 days, raise EXPIRE if admins act later
   await hput(`sub:${sub.id}`, 'data', sub, WEEK);
   await log(sub, {});
   await put(`profile:${chat}`, { rank: s.rank, name: s.name });
@@ -138,6 +133,15 @@ async function complete(chat, key, s, sub) {
     const row = await redis('HGET', `day:${s.grant.day}`, s.link);
     if (row) await redis('HSET', `day:${s.grant.day}`, s.link, JSON.stringify({ ...JSON.parse(row), mc: true }));
   }
+  await redis('DEL', key, `submit:${chat}`); // commit: no retry after this
+  try {
+    // Telegram can't delete messages older than 48h; those just stay.
+    for (let i = 0; i < s.ids.length; i += 100) {
+      await tg('deleteMessages', { chat_id: chat, message_ids: s.ids.slice(i, i + 100) });
+    }
+  } catch (e) {
+    console.error('cleanup:', e);
+  }
 }
 
 /** Label echoed under a tapped button. */
@@ -145,9 +149,3 @@ const buttonLabel = (step, v, picked) => ({
   type: TYPES[v], ack: 'Acknowledged', pledge: 'Acknowledged', profile: v === 'yes' ? 'Yes' : 'Change',
   link: picked ? picked[1].label : UNLINKED, review: v === 'yes' ? 'Submit' : 'Start over',
 }[step] ?? v);
-
-/** Whether message `m` carries an acceptable attachment for `step` (a PDF only for 'file'). */
-function validFile(m, step) {
-  const mime = m.document?.mime_type ?? '';
-  return m.photo || mime.startsWith('image/') || (step === 'file' && mime === 'application/pdf');
-}

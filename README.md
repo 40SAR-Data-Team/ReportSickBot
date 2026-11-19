@@ -16,11 +16,10 @@ Telegram POSTs every update to `api/webhook.js`. The function keeps nothing in m
 | `src/validate.js` | `invalid(step, text, state)`: returns an error message for a bad answer, else null. |
 | `src/submissions.js` | Sends a submission to admins; applies their button taps (approve, reject, acknowledge, BatSys); manages grants. |
 | `src/admin.js` | Admin decisions, the reject-reason prompt, `/overview`. |
-| `src/admins.js` | Parses the `ADMINS` env var. |
-| `src/consts.js` | Ranks, request types, pledge text, TTLs, button actions. |
-| `src/dates.js` | Singapore-time helpers and the `DD/MM/YYYY [HHMM]` parser. |
-| `src/telegram.js` | `tg`, `send`, `edit`, `toAdmin`: thin Bot API wrappers. |
-| `src/store.js` | `redis`, `json`, `hash`, `put`, `hput`: thin Upstash REST wrappers. |
+| `src/consts.js` | Shared helpers (`btn`, `who`, `replyTo`), `WEEK`, admin button actions. |
+| `src/dates.js` | `today()` in Singapore and the `DD/MM/YYYY [HHMM]` parser. |
+| `src/telegram.js` | `tg`, `send`, `edit`, `toAdmin`: thin Bot API wrappers; `admins`/`adminName` parse the `ADMINS` env var. |
+| `src/store.js` | `redis`, `json`, `hash`, `put`, `hput` (pipelined): thin Upstash REST wrappers. |
 
 ### Workflows
 
@@ -49,7 +48,7 @@ Before the first step the bot asks for rank and name (or "Continue as PTE Tan?" 
 | `profile:<chat>` | Remembered rank and name | none |
 | `sub:<id>` | A submission and its claimed outcomes | 7 days |
 | `day:<DD/MM/YYYY>` | Hash of the day's submissions, for `/overview` | n/a |
-| `grant:<chat>` | Approved requests awaiting an MC | `GRANT_KEY_TTL`; each grant's `until` does the real expiry |
+| `grant:<chat>` | Approved requests awaiting an MC | 1 year (`grant()` in `src/submissions.js`); each grant's `until` does the real expiry |
 | `submit:<chat>` | Double-tap lock on Submit | 30 s |
 | `rej:<chat>` | Admin's pending reject prompt | n/a |
 
@@ -62,8 +61,7 @@ bun test
 Nothing to install. Tests use dummy data and never touch real Telegram or Upstash:
 
 - `tests/unit.test.js`: date parsing, answer validation.
-- `tests/integration.test.js`: calls `handle` directly with `fetch` mocked to the in-memory fake in `tests/fake.js`. Add new behaviour tests here.
-- `tests/e2e.test.js`: real HTTP to the webhook, with Telegram and Upstash replaced by a local dummy server (`TELEGRAM_API` overrides the API base).
+- `tests/integration.test.js`: calls the webhook handler directly with `fetch` mocked to the in-memory fake in `tests/fake.js`. Add new behaviour tests here.
 
 CI (`.github/workflows/test.yml`) runs `bun test` on every push and pull request.
 
@@ -114,13 +112,15 @@ vercel --prod
 
 - **Reword a question:** edit `QUESTIONS` in `src/form.js`.
 - **Add or reorder a step:** add it to `QUESTIONS` and the right list in `FLOWS`; add to `BUTTON_STEPS` if answered by a button; add a rule in `invalid` (`src/validate.js`) if the answer needs checking; add to `details` if admins should see it. Update the tests.
-- **Add a rank:** edit `RANKS` in `src/consts.js`. The keyboard in `QUESTIONS.rank` is three per row; check the layout.
-- **Change an expiry:** `WEEK` and `GRANT_KEY_TTL` in `src/consts.js`; the form's `3600` in `src/flow.js`. Admin buttons stop working after `WEEK`.
+- **Add a rank:** edit `RANKS` in `src/form.js`. The keyboard in `QUESTIONS.rank` is three per row; check the layout.
+- **Change an expiry:** `WEEK` in `src/consts.js`, the grant key's 1-year TTL in `grant()`; the form's `3600` in `src/flow.js`. Admin buttons stop working after `WEEK`.
 
 ## Conventions and gotchas
 
 - **Always answer 200 from the webhook.** Any other status makes Telegram retry the same update forever. Catch and log.
 - **No new infrastructure.** Redis hashes and `SET ... NX` locks cover the double-tap guard and "first decision wins". Don't add a database or queue.
+- **Submit is at-least-once.** `sub:<id>` is saved before admins see its buttons; the form is deleted last, so any earlier failure is retried by the soldier. Admins may get a duplicate, never nothing. Keep new submit steps before that `DEL` safe to redo.
+- **Admin taps: claim first, answer after.** `claim()` is one atomic Lua `EVAL` (exists check, `HSETNX`, read-back). The tap is answered with a popup only once Redis has it; every follow-up (copies, soldier, `/overview`, grant) then runs in one parallel batch via `settle`. Keep new follow-ups in that batch, not after it.
 - **Admin messages start with `[For Admin]`.** Send them with `toAdmin`, not `send`.
 - **No personal data in git.** Never commit tokens, `.env*`, `config.json`, real names or Telegram IDs. Tests use dummy data only.
 - **Telegram limits.** Messages cap at 4096 characters (answers are capped at 500 to stay under it). Bots can't edit or delete messages older than 48 hours.
@@ -133,6 +133,7 @@ vercel --prod
 
 | Symptom | Check |
 |---|---|
+| Anything wrong | `GET https://<app>.vercel.app/api/health` → `{ok, redis, webhook, admins}`; 503 names the failing part, Vercel logs `health <part>: ...` give the reason. Point an uptime monitor (e.g. UptimeRobot, 5 min) at it. |
 | Bot silent | `https://api.telegram.org/bot<BOT_TOKEN>/getWebhookInfo` → `last_error_message`; then Vercel function logs. A 401 means `WEBHOOK_SECRET` differs from the one given to `setWebhook`. |
 | Admin gets nothing | Vercel logs `admin <name> <id>: ...`. Usually they never pressed Start, or the ID is wrong. |
 | `redis: ...` errors | `KV_REST_API_URL` / `KV_REST_API_TOKEN` in the Vercel project. |
