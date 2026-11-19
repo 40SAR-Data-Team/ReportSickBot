@@ -707,3 +707,20 @@ test.each([['rank', [text('/start')], 'rank:GEN'], ['type', SICK_FLOW.slice(0, 3
     expect(JSON.parse(b.store.get('form:111')).step).toBe(step);
   },
 );
+
+// --- at-least-once submit: the form is deleted last, so any earlier Redis failure is retried ---
+test.each([
+  ['before any admin is messaged', ['HSET', 1], 1],
+  ['after the admins were messaged', ['HSET', 2], 2],
+  ['at the final form delete', ['DEL', 1], 2],
+])('Redis failing %s: the soldier retries, admins get it at least once, buttons work', async (_, failOn, copies) => {
+  await sendAll(SICK_FLOW.slice(0, -1));
+  b.failOn = failOn;
+  await send(SUBMIT);
+  expect(b.toUser().at(-1)).toContain('Failed to send');
+  await send(SUBMIT);
+  expect(b.toUser().at(-1)).toEndWith('Submitted ✅');
+  expect(posts(ADMINS[0])).toHaveLength(copies);
+  await send(adminTap(ADMINS[1], keys(ADMINS[1], 0)[0].callback_data)); // the first copy's Approve
+  expect(lastToUser().text).toStartWith('✅ Approved by Admin B');
+});

@@ -119,6 +119,7 @@ vercel --prod
 
 - **Always answer 200 from the webhook.** Any other status makes Telegram retry the same update forever. Catch and log.
 - **No new infrastructure.** Redis hashes and `SET ... NX` locks cover the double-tap guard and "first decision wins". Don't add a database or queue.
+- **Submit is at-least-once.** `sub:<id>` is saved before admins see its buttons; the form is deleted last, so any earlier failure is retried by the soldier. Admins may get a duplicate, never nothing. Keep new submit steps before that `DEL` safe to redo.
 - **Admin messages start with `[For Admin]`.** Send them with `toAdmin`, not `send`.
 - **No personal data in git.** Never commit tokens, `.env*`, `config.json`, real names or Telegram IDs. Tests use dummy data only.
 - **Telegram limits.** Messages cap at 4096 characters (answers are capped at 500 to stay under it). Bots can't edit or delete messages older than 48 hours.

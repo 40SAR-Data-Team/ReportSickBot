@@ -1,5 +1,5 @@
 import { WEEK, btn, replyTo, who } from './consts.js';
-import { parseDateTime } from './dates.js';
+import { parseDateTime, today } from './dates.js';
 import { details } from './form.js';
 import { hash, hput, redis } from './store.js';
 import { FOR_ADMIN, admins, edit, send, tg, toAdmin } from './telegram.js';
@@ -44,12 +44,19 @@ export function buttons(sub, f) {
  * @param {object} s Completed form state.
  * @param {object} from Telegram user who sent the form.
  * @return {Promise<object|null>} The submission with `msgs` [adminChat, messageId], or null if no admin received it.
+ * @throws {Error} If Redis fails; nothing is committed, so the caller lets the soldier retry.
  */
 export async function submit(chat, s, from) {
   const lines = details(s);
   lines.push(`Sent by: ${from.username ? `@${from.username}` : `user id ${from.id}`}`);
   const kind = { sick: 'sick request', appt: `medical appointment ${s.when}`, mc: `MC ${s.start} to ${s.end}` }[s.type];
-  const sub = { id: crypto.randomUUID(), user: chat, type: s.type, text: lines.join('\n'), label: `${who(s)}, ${kind}`, kind, rank: s.rank, name: s.name, when: s.when };
+  const sub = {
+    id: crypto.randomUUID(), user: chat, type: s.type, text: lines.join('\n'), label: `${who(s)}, ${kind}`, kind, rank: s.rank, name: s.name, when: s.when,
+    day: today(), at: new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Singapore', hour: '2-digit', minute: '2-digit' }), msgs: [],
+  };
+  // saved before any admin sees a button, so no button ever points at a missing submission
+  // ponytail: buttons go dead after 7 days, raise WEEK if admins act later
+  await hput(`sub:${sub.id}`, 'data', sub, WEEK);
   const file = s.file ?? s.shot;
   const list = admins();
   const results = await Promise.allSettled(list.map(async ([, admin]) => {

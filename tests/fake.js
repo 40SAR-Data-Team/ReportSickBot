@@ -25,6 +25,8 @@ export function fakeBackend() {
     }
     const [cmd, key, val, val2] = body;
     if (cmd === 'PING') return { result: 'PONG' };
+    // failOn = [cmd, n]: the n-th `cmd` from now fails once, like a Redis blip
+    if (b.failOn?.[0] === cmd && --b.failOn[1] === 0) return { error: 'dummy down' };
     if (cmd === 'HSET') return b.store.set(key, new Map(b.store.get(key)).set(val, val2)), { result: 1 };
     if (cmd === 'HSETNX') {
       if (b.store.get(key)?.has(val)) return { result: 0 };
