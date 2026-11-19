@@ -133,6 +133,7 @@ vercel --prod
 
 | Symptom | Check |
 |---|---|
+| Anything wrong | `GET https://<app>.vercel.app/api/health` → `{ok, redis, webhook, admins}`; 503 names the failing part, Vercel logs `health <part>: ...` give the reason. Point an uptime monitor (e.g. UptimeRobot, 5 min) at it. |
 | Bot silent | `https://api.telegram.org/bot<BOT_TOKEN>/getWebhookInfo` → `last_error_message`; then Vercel function logs. A 401 means `WEBHOOK_SECRET` differs from the one given to `setWebhook`. |
 | Admin gets nothing | Vercel logs `admin <name> <id>: ...`. Usually they never pressed Start, or the ID is wrong. |
 | `redis: ...` errors | `KV_REST_API_URL` / `KV_REST_API_TOKEN` in the Vercel project. |

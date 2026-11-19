@@ -1,6 +1,7 @@
 // Calls the handler directly with fetch mocked to the dummy backend.
 import { afterAll, beforeEach, expect, test } from 'bun:test';
 import handler, { today as day } from '../api/webhook.js';
+import health from '../api/health.js';
 import { ADMINS, APPT_DAY, TOMORROW, YESTERDAY, APPT_FLOW, ENV, MC_FLOW, SICK_FLOW, USER, adminTap, SUBMIT, adminText, doc, fakeBackend, groupText, photo, tap, text } from './fake.js';
 
 const realFetch = globalThis.fetch;
@@ -734,4 +735,26 @@ test('user starts the form and selects a rank', async () => {
       step: 'name',
       rank: 'PTE'
     });
+});
+
+async function checkHealth() {
+  let status, body;
+  await health({}, { status(c) { status = c; return this; }, json(j) { body = j; } });
+  return { status, body };
+}
+
+test('health: 200 when Redis, webhook and admins are fine', async () => {
+  expect(await checkHealth()).toEqual({ status: 200, body: { ok: true, redis: true, webhook: true, admins: true } });
+});
+
+test.each([
+  ['redis', () => { globalThis.fetch = async (url, init) => Response.json(String(url).includes('/bot') ? b.respond(String(url), {}) : { error: 'down' }); }],
+  ['webhook', () => { b.webhookInfo = { last_error_date: Math.floor(Date.now() / 1000) - 60, last_error_message: 'Wrong response' }; }],
+  ['webhook', () => { b.webhookInfo = { url: '' }; }],
+  ['admins', () => { delete process.env.ADMINS; }],
+])('health: 503 when %s is down', async (part, breakIt) => {
+  breakIt();
+  const { status, body } = await checkHealth();
+  expect(status).toBe(503);
+  expect(body).toMatchObject({ ok: false, [part]: false });
 });
