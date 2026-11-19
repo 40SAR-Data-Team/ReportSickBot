@@ -19,7 +19,7 @@ Telegram POSTs every update to `api/webhook.js`. The function keeps nothing in m
 | `src/consts.js` | Shared helpers (`btn`, `who`, `replyTo`), `WEEK`, admin button actions. |
 | `src/dates.js` | `today()` in Singapore and the `DD/MM/YYYY [HHMM]` parser. |
 | `src/telegram.js` | `tg`, `send`, `edit`, `toAdmin`: thin Bot API wrappers; `admins`/`adminName` parse the `ADMINS` env var. |
-| `src/store.js` | `redis`, `json`, `hash`, `put`, `hput`: thin Upstash REST wrappers. |
+| `src/store.js` | `redis`, `json`, `hash`, `put`, `hput` (pipelined): thin Upstash REST wrappers. |
 
 ### Workflows
 
@@ -120,6 +120,7 @@ vercel --prod
 - **Always answer 200 from the webhook.** Any other status makes Telegram retry the same update forever. Catch and log.
 - **No new infrastructure.** Redis hashes and `SET ... NX` locks cover the double-tap guard and "first decision wins". Don't add a database or queue.
 - **Submit is at-least-once.** `sub:<id>` is saved before admins see its buttons; the form is deleted last, so any earlier failure is retried by the soldier. Admins may get a duplicate, never nothing. Keep new submit steps before that `DEL` safe to redo.
+- **Admin taps: claim first, answer after.** `claim()` is one atomic Lua `EVAL` (exists check, `HSETNX`, read-back). The tap is answered with a popup only once Redis has it; every follow-up (copies, soldier, `/overview`, grant) then runs in one parallel batch via `settle`. Keep new follow-ups in that batch, not after it.
 - **Admin messages start with `[For Admin]`.** Send them with `toAdmin`, not `send`.
 - **No personal data in git.** Never commit tokens, `.env*`, `config.json`, real names or Telegram IDs. Tests use dummy data only.
 - **Telegram limits.** Messages cap at 4096 characters (answers are capped at 500 to stay under it). Bots can't edit or delete messages older than 48 hours.

@@ -21,8 +21,9 @@ export async function handle(update) {
   const key = `form:${chat}`;
   let text = update.message?.text?.trim();
   const admin = adminName((update.message ?? cb).from.id);
-  if (cb) await tg('answerCallbackQuery', { callback_query_id: cb.id });
+  // admin taps are answered by decide, after their claim is stored; soldier taps right away
   if (ADMIN_ACTIONS.includes(cb?.data?.split(':')[0])) return decide(cb, admin);
+  if (cb) await tg('answerCallbackQuery', { callback_query_id: cb.id });
   if (admin && text === '/overview') return overview(chat);
   if (admin && text && !text.startsWith('/') && await finishReject(chat, admin, text)) return;
 

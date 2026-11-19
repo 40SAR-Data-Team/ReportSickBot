@@ -600,7 +600,45 @@ test('a button the request no longer offers is ignored', async () => {
 test('an admin tapping a button on their own request is told why', async () => {
   b.store.set('sub:own', new Map([['data', JSON.stringify({ id: 'own', user: ADMINS[0], type: 'sick', msgs: [] })]]));
   await send(adminTap(ADMINS[0], 'approve:own'));
-  expect(b.toAdmin(ADMINS[0]).at(-1).text).toContain('cannot act on your own request');
+  expect(b.calls.findLast((c) => c.method === 'answerCallbackQuery').text).toContain('cannot act on your own request');
+  expect(b.store.get('sub:own').has('decided')).toBe(false);
+});
+
+// --- admin tap: answered only once the claim is stored, in few round trips ---
+const answers = () => b.calls.filter((c) => c.method === 'answerCallbackQuery').map((c) => c.text);
+
+test.each([
+  ['approve', 0, 'decided', '✅ Approved'],
+  ['seen', 1, 'seen', '👍 Acknowledged'],
+])('%s: the tap is answered only after Redis has the claim, and says so', async (_, nthPost, field, toast) => {
+  if (nthPost) { await approveSick(); await linkedMc(); await sendAll([photo(), SUBMIT]); } else await sendAll(SICK_FLOW);
+  const data = keys(ADMINS[1])[0].callback_data;
+  const subKey = `sub:${data.split(':')[1]}`;
+  let storedWhenAnswered;
+  const respond = b.respond;
+  b.respond = (url, body) => {
+    if (url.endsWith('/answerCallbackQuery')) storedWhenAnswered = b.store.get(subKey).get(field);
+    return respond(url, body);
+  };
+  await send(adminTap(ADMINS[1], data));
+  expect(storedWhenAnswered).toContain('Admin B');
+  expect(answers().at(-1)).toBe(toast);
+});
+
+test('an approval takes 4 sequential round trips (was 10)', async () => {
+  await sendAll(SICK_FLOW);
+  const approve = keys(ADMINS[1])[0].callback_data;
+  // Hold every call; release whatever is waiting together, as one wave. Calls made in parallel share a wave,
+  // so the wave count is the sequential round-trip count, independent of machine speed.
+  const fast = globalThis.fetch;
+  let held = [], waves = 0;
+  globalThis.fetch = (url, init) => new Promise((resolve) => {
+    if (!held.length) setImmediate(() => { const now = held; held = []; waves++; now.forEach((go) => go()); });
+    held.push(() => resolve(fast(url, init)));
+  });
+  await send(adminTap(ADMINS[1], approve));
+  expect(waves).toBe(4); // lookup, claim, one parallel batch, then the reminder kept below the approval
+  expect(lastToUser().text).toStartWith('✅ Approved by Admin B');
 });
 
 async function checkHealth() {
@@ -632,6 +670,7 @@ test('two admins approving at once: exactly one wins', async () => {
   await Promise.all(ADMINS.map((a) => send(adminTap(a, approve))));
   expect(b.toUser().filter((t) => t.startsWith('✅ Approved by'))).toHaveLength(1);
   expect(b.store.get('grant:111').size).toBe(1);
+  expect(answers().filter((t) => t === '✅ Approved')).toHaveLength(1); // the loser is not told it won
 });
 
 test('two Submit taps at once send one request', async () => {
