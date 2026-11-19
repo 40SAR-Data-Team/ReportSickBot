@@ -17,7 +17,7 @@ Telegram POSTs every update to `api/webhook.js`. The function keeps nothing in m
 | `src/submissions.js` | Sends a submission to admins; applies their button taps (approve, reject, acknowledge, BatSys); manages grants. |
 | `src/admin.js` | Admin decisions, the reject-reason prompt, `/overview`. |
 | `src/consts.js` | Shared helpers (`btn`, `who`, `replyTo`), `WEEK`, admin button actions. |
-| `src/dates.js` | `today()` in Singapore and the `DD/MM/YYYY [HHMM]` parser. |
+| `src/dates.js` | `today()` in Singapore and the date parser. Soldiers type `DDMMYY [HHMM]`; `expand` turns it into `DD/MM/YYYY` for storage and display. |
 | `src/telegram.js` | `tg`, `send`, `edit`, `toAdmin`: thin Bot API wrappers; `admins`/`adminName` parse the `ADMINS` env var. |
 | `src/store.js` | `redis`, `json`, `hash`, `put`, `hput` (pipelined): thin Upstash REST wrappers. |
 

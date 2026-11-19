@@ -1,7 +1,7 @@
 import { expect, setSystemTime, test } from 'bun:test';
-import { parseDateTime, today } from '../src/dates.js';
+import { expand, parseDateTime, today } from '../src/dates.js';
 import { invalid } from '../src/validate.js';
-import { APPT_DAY, TOMORROW } from './fake.js';
+import { TOMORROW } from './fake.js';
 
 test.each([
   ['1/2/2026', false, Date.UTC(2026, 1, 1)], // single-digit day and month
@@ -50,23 +50,32 @@ test.each([
   ['time', '08:30', {}, null],
   ['time', '2500', {}, 'Invalid time'],
   ['time', 'tomorrow', {}, 'Invalid time'],
-  ['when', `${APPT_DAY} 1400`, {}, null],
-  ['when', APPT_DAY, {}, 'Invalid date/time'],
-  ['when', '01/01/2020 1400', {}, 'in the past'],
-  ['when', '01/01/2099 1400', {}, 'too far ahead'],
-  ['start', '01/01/2099', {}, 'too far from today'],
-  ['end', APPT_DAY, { start: '01/01/2000' }, 'longer than a year'],
-  ['start', '10/10/2026', {}, null],
-  ['start', '10/10/2026 0830', {}, 'Invalid date'],
-  ['start', '13/10/2026', { end: '12/10/2026' }, 'after the end'],
-  ['start', '12/10/2026', { end: '12/10/2026' }, null],
-  ['end', '09/10/2026', { start: '10/10/2026' }, 'before the start'],
-  ['end', '10/10/2026', { start: '10/10/2026' }, null],
-  ['end', '31/02/2026', { start: '10/10/2026' }, 'Invalid date'],
+  ['when', `${TOMORROW} 1400`, {}, null],
+  ['when', TOMORROW, {}, 'Use DDMMYY HHMM'],
+  ['when', '010120 1400', {}, 'in the past'],
+  ['when', '010199 1400', {}, 'too far ahead'],
+  ['start', '010199', {}, 'too far from today'],
+  ['end', TOMORROW, { start: '01/01/2000' }, 'longer than a year'],
+  ['start', '101026', {}, null],
+  ['start', '101026 0830', {}, 'Use DDMMYY'],
+  ['start', '131026', { end: '12/10/2026' }, 'after the end'],
+  ['start', '121026', { end: '12/10/2026' }, null],
+  ['end', '091026', { start: '10/10/2026' }, 'before the start'],
+  ['end', '101026', { start: '10/10/2026' }, null],
+  ['end', '310226', { start: '10/10/2026' }, 'Invalid date'],
 ])('invalid(%p, %p)', (step, text, s, err) => {
+  text = expand(text); // as flow.js does for date steps; no other row starts with 6 digits
   if (err) expect(invalid(step, text, s)).toContain(err);
   else expect(invalid(step, text, s)).toBeNull();
 });
+
+test.each([
+  ['151126', '15/11/2026'],
+  ['251226 0930', '25/12/2026 0930'],
+  ['15/11/2026', '15/11/2026'], // old format still accepted
+  ['1511261', '1511261'], // 7 digits: left alone, then rejected
+  ['15112', '15112'],
+])('expand(%p)', (typed, stored) => expect(expand(typed)).toBe(stored));
 
 test('today() rolls over at Singapore midnight, not UTC', () => {
   try {

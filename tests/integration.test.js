@@ -1,9 +1,9 @@
 // Calls the handler directly with fetch mocked to the dummy backend.
 import { afterAll, beforeEach, expect, setSystemTime, test } from 'bun:test';
 import handler from '../api/webhook.js';
-import { today as day } from '../src/dates.js';
+import { expand, today as day } from '../src/dates.js';
 import health from '../api/health.js';
-import { ADMINS, APPT_DAY, YESTERDAY, APPT_FLOW, ENV, MC_FLOW, SICK_FLOW, USER, adminTap, SUBMIT, adminText, doc, fakeBackend, groupText, photo, tap, text } from './fake.js';
+import { ADMINS, APPT_DAY, TOMORROW, YESTERDAY, APPT_FLOW, ENV, MC_FLOW, SICK_FLOW, USER, adminTap, SUBMIT, adminText, doc, fakeBackend, groupText, photo, tap, text } from './fake.js';
 
 const realFetch = globalThis.fetch;
 let b;
@@ -271,7 +271,7 @@ test('"Send MC / Status" under the approval starts a linked MC with only 5 quest
   expect(b.toUser().at(-1)).toBe('What new status are you given / What is your reason for MC?');
   await sendAll([text('Light duty'), tap('today')]);
   expect(JSON.parse(b.store.get('form:111')).start).toBe(day());
-  await sendAll([text(APPT_DAY), photo(), SUBMIT]);
+  await sendAll([text(TOMORROW), photo(), SUBMIT]);
   expect(posts(ADMINS[0]).at(-1).text).toContain(`PTE Tan Ah Kow\nFor: 🤒`);
   expect(posts(ADMINS[0]).at(-1).text).toContain(`From ${day()} to ${APPT_DAY}`);
   await send(tap(mcfor)); // already used
@@ -466,7 +466,7 @@ test('/cancel clears the form; next message restarts', async () => {
   expect(b.toUser().at(-1)).toContain('What is your Rank?');
 });
 
-test.each([['sick', SICK_FLOW, `Symptoms since: ${YESTERDAY}\nLaterality: Left`], ['appt', APPT_FLOW, 'Clinic: SGH Dermatology']])(
+test.each([['sick', SICK_FLOW, `Symptoms since: ${expand(YESTERDAY)}\nLaterality: Left`], ['appt', APPT_FLOW, 'Clinic: SGH Dermatology']])(
   '%s flow: review shows the answers before anything reaches admins',
   async (_, flow, line) => {
     await sendAll(flow.slice(0, -1));

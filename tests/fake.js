@@ -90,9 +90,9 @@ export const SICK_FLOW = [text('/start'), tap('rank:PTE'), text('Tan Ah Kow'), t
   text('Fever and sore throat'), text(YESTERDAY), tap('body:Left'), text('Kranji Medical Centre'), text('0830'), tap('ack:yes'), tap('review:yes')];
 /** MC after an earlier request: its saved profile is reused. With an open grant, a link tap goes after the first 3. Add the file, then `SUBMIT`. */
 export const MC_FLOW = [text('/start'), tap('profile:yes'), tap('type:mc'), text('6ad8500b1d0ae72f026cfa75'),
-  text('Sprained ankle, light duty'), text('10/10/2026'), text('12/10/2026')];
-/** Tomorrow in Singapore, a valid appointment date whenever the suite runs. */
+  text('Sprained ankle, light duty'), text('101026'), text('121026')];
+/** Tomorrow in Singapore as shown (DD/MM/YYYY), a valid appointment date whenever the suite runs. */
 export const APPT_DAY = new Date(Date.now() + 864e5).toLocaleDateString('en-GB', { timeZone: 'Asia/Singapore' });
 export const SUBMIT = tap('review:yes');
 export const APPT_FLOW = [text('/start'), tap('rank:PTE'), text('Tan Ah Kow'), tap('type:appt'),
-  text('Eczema'), text(`${APPT_DAY} 1400`), text('SGH Dermatology'), photo(), tap('pledge:yes'), tap('review:yes')];
+  text('Eczema'), text(`${TOMORROW} 1400`), text('SGH Dermatology'), photo(), tap('pledge:yes'), tap('review:yes')];

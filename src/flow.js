@@ -1,6 +1,6 @@
 import { decide, finishReject, overview } from './admin.js';
 import { ADMIN_ACTIONS, WEEK, replyTo } from './consts.js';
-import { today } from './dates.js';
+import { expand, today } from './dates.js';
 import { BUTTON_STEPS, FLOWS, TYPES, UNLINKED, ask, blank, question } from './form.js';
 import { hput, json, put, redis } from './store.js';
 import { grants, linkTo, log, submit } from './submissions.js';
@@ -74,6 +74,7 @@ export async function handle(update) {
     value = m.message_id;
     s.caption = m.caption;
   } else {
+    if (['onset', 'when', 'start', 'end'].includes(s.step)) text = expand(text);
     const err = invalid(s.step, text, s);
     // ponytail: a 2nd bad Response ID skips the question instead of blocking the MC
     if (err && (s.step !== 'formsg' || (s.strikes = (s.strikes ?? 0) + 1) < 2)) return reply(s.step, err);
