@@ -16,5 +16,7 @@ export const HTML = { parse_mode: 'HTML' };
 export const btn = (text, data) => ({ text, callback_data: data });
 /** "RANK Name" of a form or submission. */
 export const who = (s) => `${s.rank} ${s.name}`;
+/** Runs `tasks` in parallel and logs failures instead of throwing, so one failed side effect can't stop the others. */
+export const settle = async (tasks) => (await Promise.allSettled(tasks)).forEach((r) => r.status === 'rejected' && console.error(r.reason));
 /** Telegram reply_parameters for `message_id`; falsy if none. Sends anyway if the target is gone. */
 export const replyTo = (message_id) => message_id && { message_id, allow_sending_without_reply: true };

@@ -1,7 +1,7 @@
 import { WEEK, btn, replyTo, who } from './consts.js';
 import { parseDateTime, today } from './dates.js';
 import { details } from './form.js';
-import { hash, hput, redis } from './store.js';
+import { hash, hput, pairs, redis } from './store.js';
 import { FOR_ADMIN, admins, edit, send, tg, toAdmin } from './telegram.js';
 
 /**
@@ -91,38 +91,52 @@ export async function log(sub, f) {
   await hput(`day:${sub.day}`, sub.id, row, WEEK + 86400);
 }
 
+// Runs inside Redis as one atomic command: no other client can act between the existence check,
+// the claim and the read-back, so the state returned is exactly the state this claim produced.
+// The existence check stops HSETNX from recreating an expired submission as a TTL-less key.
+const CLAIM = `if redis.call('HEXISTS', KEYS[1], 'data') == 0 then return nil end
+local won = redis.call('HSETNX', KEYS[1], ARGV[1], ARGV[2])
+return {won, redis.call('HGETALL', KEYS[1])}`;
+
 /**
- * First tap wins: claims `field` on the submission, then refreshes every admin copy and the soldier's summary,
- * and replies `notify` to the soldier (a new message push-notifies; edits don't). No `notify`: the soldier's chat is left alone.
+ * First tap wins: atomically claims `field` on the submission, in one round trip.
  *
  * @param {string} id Submission id.
  * @param {string} field Field to claim: decided, seen or batsys.
  * @param {string} value Value to store, usually the admin's name.
+ * @return {Promise<?{won: boolean, sub: object, f: object}>} Null if expired; else the stored state right after the claim.
+ */
+export async function claim(id, field, value) {
+  const r = await redis('EVAL', CLAIM, 1, `sub:${id}`, field, value);
+  if (!r) return null;
+  const f = pairs(r[1]);
+  f.decided &&= JSON.parse(f.decided);
+  return { won: r[0] === 1, sub: JSON.parse(f.data), f };
+}
+
+/**
+ * Tasks that show a won claim: every admin copy, the /overview row and, with `notify`, the soldier's summary plus
+ * a new message (a new message push-notifies; edits don't). No `notify`: the soldier's chat is left alone.
+ * Returned unawaited so the caller runs them in one parallel batch with its own tasks.
+ *
+ * @param {{sub: object, f: object}} c A won claim.
  * @param {string=} notify Message for the soldier.
  * @param {object=} markup reply_markup for `notify`.
- * @return {Promise<object|null>} The submission, or null if taken / expired.
+ * @param {Function=} after Runs once `notify` is sent, to keep a follow-up message below it.
+ * @return {Array<Promise>}
  */
-export async function apply(id, field, value, notify, markup) {
-  const key = `sub:${id}`;
-  // HSETNX is atomic: a second tap, or two admins tapping at once, gets 0.
-  if (!(await redis('HGET', key, 'data')) || !(await redis('HSETNX', key, field, value))) return null;
-  const f = await hash(key);
-  f.decided &&= JSON.parse(f.decided);
-  const sub = JSON.parse(f.data);
+export function broadcast({ sub, f }, notify, markup, after) {
   const body = `${sub.text}\n\n${outcome(f).join('\n')}`;
   const open = buttons(sub, f);
   const reply_markup = open.length ? { inline_keyboard: [open] } : undefined; // omitted: keyboard removed
-  const soldier = notify ? [
-    edit(sub.user, sub.summary, `${sub.text}\n\n${outcome(f, true).join('\n')}`),
-    send(sub.user, notify, { reply_to_message_id: sub.summary, reply_markup: markup }),
-  ] : [];
-  const results = await Promise.allSettled([
+  return [
     ...sub.msgs.map(([chat_id, message_id]) => edit(chat_id, message_id, `${FOR_ADMIN} ${body}`, { reply_markup })),
-    ...soldier,
     log(sub, f),
-  ]);
-  results.forEach((r) => r.status === 'rejected' && console.error('apply:', r.reason));
-  return sub;
+    ...(notify ? [
+      edit(sub.user, sub.summary, `${sub.text}\n\n${outcome(f, true).join('\n')}`),
+      send(sub.user, notify, { reply_to_message_id: sub.summary, reply_markup: markup }).then(after),
+    ] : []),
+  ];
 }
 
 /**
