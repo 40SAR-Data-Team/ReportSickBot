@@ -1,4 +1,9 @@
-import { FOR_ADMIN } from './consts.js';
+/** Prefix on everything the bot sends to admins. */
+export const FOR_ADMIN = '[For Admin]';
+/** Admins as [name, telegramId] from the ADMINS env var (JSON {"name": id}). Unset means none, so submit fails loudly. */
+export const admins = () => Object.entries(JSON.parse(process.env.ADMINS ?? '{}'));
+/** Name of the admin with Telegram id `id`, or undefined if not an admin. */
+export const adminName = (id) => admins().find(([, a]) => a === id)?.[0];
 
 /**
  * Calls a Telegram Bot API method.
@@ -9,8 +14,7 @@ import { FOR_ADMIN } from './consts.js';
  * @throws {Error} If Telegram answers ok: false.
  */
 export async function tg(method, body) {
-  const api = process.env.TELEGRAM_API ?? 'https://api.telegram.org'; // overridden only by e2e tests
-  const r = await fetch(`${api}/bot${process.env.BOT_TOKEN}/${method}`, {
+  const r = await fetch(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/${method}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),

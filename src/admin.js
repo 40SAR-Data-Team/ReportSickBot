@@ -1,8 +1,9 @@
-import { EG, FOR_ADMIN, FORM, HTML, SUB_ACTIONS, btn, replyTo } from './consts.js';
+import { HTML, SUB_ACTIONS, btn, replyTo } from './consts.js';
 import { today } from './dates.js';
+import { EG, FORM } from './form.js';
 import { hash, json, put, redis } from './store.js';
-import { apply, buttons, grant } from './submissions.js';
-import { edit, send, toAdmin } from './telegram.js';
+import { apply, buttons, grant, outcome } from './submissions.js';
+import { FOR_ADMIN, edit, send, toAdmin } from './telegram.js';
 
 /** [type, heading] of each overview section. */
 const SECTIONS = [['sick', '🤒 Report sick'], ['appt', '🏥 Medical appointment'], ['mc', '📄 MC / Status']];
@@ -14,11 +15,7 @@ export async function overview(chat) {
   const day = today();
   const rows = Object.values(await hash(`day:${day}`)).map((v) => JSON.parse(v)).sort((a, b) => a.at.localeCompare(b.at));
   const state = (r) => (r.type === 'mc' ? r.seen && 'seen' : r.decided?.v) || 'wait';
-  const status = (r) => [
-    r.type === 'mc' ? (r.seen ? `👍 acknowledged by ${r.seen}` : '⏳ not yet acknowledged')
-      : r.decided ? `${ICONS[r.decided.v]} ${r.decided.v} by ${r.decided.by}` : '⏳ waiting',
-    r.batsys && `✅ BatSys by ${r.batsys}`,
-  ].filter(Boolean).join(' · ');
+  const status = (r) => outcome(r).join(' · ') || (r.type === 'mc' ? '⏳ not yet acknowledged' : '⏳ waiting');
   const list = (title, rs, more) => `${title}\n${rs.map((r) => `${r.at} ${r.label}${more ? ` – ${more(r)}` : ''}`).join('\n') || 'None'}`;
   const counts = SECTIONS.map(([type, title]) => {
     const rs = rows.filter((r) => r.type === type);
@@ -77,22 +74,6 @@ export async function finishReject(chat, name, reason, id) {
 }
 
 /**
- * Checks that a button tap is still valid.
- *
- * @param {number} chat Admin's chat id.
- * @param {string} id Submission id.
- * @param {string} action Button action.
- * @return {Promise<boolean|string>} 'own' for an admin acting on their own submission, false for a stale / replayed tap, else true.
- */
-async function allowed(chat, id, action) {
-  const f = await hash(`sub:${id}`);
-  if (!f.data) return true; // expired: apply / askReason say so
-  const sub = JSON.parse(f.data);
-  if (sub.user === chat) return 'own';
-  return buttons(sub, f).some((b) => b.callback_data === `${action}:${id}`);
-}
-
-/**
  * Handles an admin button tap on a submission or a reject prompt.
  *
  * @param {object} cb Telegram callback_query.
@@ -102,10 +83,12 @@ export async function decide(cb, name) {
   if (!name) return;
   const [action, id] = cb.data.split(':');
   const chat = cb.message.chat.id;
-  if (SUB_ACTIONS.includes(action)) {
-    const ok = await allowed(chat, id, action);
-    if (ok === 'own') return toAdmin(chat, 'You cannot act on your own request. Another admin must.');
-    if (!ok) return;
+  const f = SUB_ACTIONS.includes(action) && await hash(`sub:${id}`);
+  if (f?.data) { // expired: apply / askReason say so
+    const sub = JSON.parse(f.data);
+    f.decided &&= JSON.parse(f.decided);
+    if (sub.user === chat) return toAdmin(chat, 'You cannot act on your own request. Another admin must.');
+    if (!buttons(sub, f).some((b) => b.callback_data === cb.data)) return; // stale / replayed tap
   }
   if (action === 'reject') return askReason(chat, id, cb.message.message_id);
   if (action === 'rejskip') return finishReject(chat, name, null, id);

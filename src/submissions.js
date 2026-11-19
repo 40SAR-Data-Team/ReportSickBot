@@ -1,9 +1,8 @@
-import { admins } from './admins.js';
-import { FOR_ADMIN, GRANT_KEY_TTL, WEEK, btn, replyTo, who } from './consts.js';
+import { WEEK, btn, replyTo, who } from './consts.js';
 import { parseDateTime } from './dates.js';
 import { details } from './form.js';
 import { hash, hput, redis } from './store.js';
-import { edit, send, tg, toAdmin } from './telegram.js';
+import { FOR_ADMIN, admins, edit, send, tg, toAdmin } from './telegram.js';
 
 /**
  * Lists a soldier's open grants: approved requests still awaiting an MC / Status.
@@ -17,12 +16,12 @@ export async function grants(chat) {
 /** Form state fields that link an MC to the grant `[id, g]`. */
 export const linkTo = ([id, g]) => ({ link: id, grant: g, rank: g.rank, name: g.name });
 
-/** The decision on a submission as {v, by, reason}, or undefined if still open. */
-const decided = (f) => f.decided && JSON.parse(f.decided);
-
-/** Outcome lines of a submission, from its claimed fields. The soldier's copy leaves out the BatSys tick. */
-function outcome(f, soldier) {
-  const d = decided(f);
+/**
+ * Outcome lines of a submission, from its claimed fields (`decided` parsed to {v, by, reason?}) or an /overview row.
+ * The soldier's copy leaves out the BatSys tick.
+ */
+export function outcome(f, soldier) {
+  const d = f.decided;
   return [
     d && (d.v === 'approved' ? `✅ Approved by ${d.by}` : `❌ Rejected by ${d.by}${d.reason ? `\nReason: ${d.reason}` : ''}`),
     f.seen && `👍 Acknowledged by ${f.seen}`,
@@ -35,7 +34,7 @@ export function buttons(sub, f) {
   const batsys = f.batsys ? [] : [btn('Added to BatSys?', `batsys:${sub.id}`)];
   if (sub.type === 'mc') return f.seen ? batsys : [btn('👍 Acknowledge', `seen:${sub.id}`)];
   if (!f.decided) return [btn('✅ Approve', `approve:${sub.id}`), btn('❌ Reject', `reject:${sub.id}`)];
-  return decided(f).v === 'approved' ? batsys : [];
+  return f.decided.v === 'approved' ? batsys : [];
 }
 
 /**
@@ -79,7 +78,7 @@ export async function submit(chat, s, from) {
  * @param {object} f Its claimed fields (decided, seen, batsys).
  */
 export async function log(sub, f) {
-  const d = decided(f);
+  const d = f.decided; // the reject reason stays out of the day list
   const row = { at: sub.at, type: sub.type, label: sub.label, decided: d && { v: d.v, by: d.by }, seen: f.seen, batsys: f.batsys };
   // outlives the 7-day sub, so a late tap still updates an existing day list
   await hput(`day:${sub.day}`, sub.id, row, WEEK + 86400);
@@ -101,6 +100,7 @@ export async function apply(id, field, value, notify, markup) {
   // HSETNX is atomic: a second tap, or two admins tapping at once, gets 0.
   if (!(await redis('HGET', key, 'data')) || !(await redis('HSETNX', key, field, value))) return null;
   const f = await hash(key);
+  f.decided &&= JSON.parse(f.decided);
   const sub = JSON.parse(f.data);
   const body = `${sub.text}\n\n${outcome(f).join('\n')}`;
   const open = buttons(sub, f);
@@ -130,6 +130,6 @@ export async function grant(sub) {
     rank: sub.rank, name: sub.name, summary: sub.summary, msgs: sub.msgs, day: sub.day, until: from + WEEK * 1000,
     label: `${sub.type === 'appt' ? '🏥' : '🤒'} ${sub.day.slice(0, 5)} ${sub.at} ${sub.kind}`,
   };
-  // ponytail: fixed key TTL, expired fields are filtered by `until`; per-field HEXPIRE if it grows
-  await hput(`grant:${sub.user}`, sub.id, g, GRANT_KEY_TTL);
+  // ponytail: fixed 1-year key TTL as a janitor, expired fields are filtered by `until`; per-field HEXPIRE if it grows
+  await hput(`grant:${sub.user}`, sub.id, g, 365 * 86400);
 }

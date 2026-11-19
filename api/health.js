@@ -1,6 +1,5 @@
-import { admins } from '../src/admins.js';
 import { redis } from '../src/store.js';
-import { tg } from '../src/telegram.js';
+import { admins, tg } from '../src/telegram.js';
 
 /** Runs a check; any throw or falsy result counts as down, and is logged. */
 const check = async (name, fn) => {
