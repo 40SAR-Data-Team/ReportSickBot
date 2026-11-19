@@ -19,10 +19,12 @@ export function fakeBackend() {
       const call = { method, ...body };
       b.calls.push(call);
       if (b.failFor.has(body.chat_id)) return { ok: false, description: 'dummy failure' };
-      call.result = method === 'sendMessage' || method === 'copyMessage' ? { message_id: ++b.nextId } : true;
+      call.result = method === 'sendMessage' || method === 'copyMessage' ? { message_id: ++b.nextId }
+        : method === 'getWebhookInfo' ? { url: 'https://dummy/api/webhook', pending_update_count: 0, ...b.webhookInfo } : true;
       return { ok: true, result: call.result };
     }
     const [cmd, key, val, val2] = body;
+    if (cmd === 'PING') return { result: 'PONG' };
     if (cmd === 'HSET') return b.store.set(key, new Map(b.store.get(key)).set(val, val2)), { result: 1 };
     if (cmd === 'HSETNX') {
       if (b.store.get(key)?.has(val)) return { result: 0 };
