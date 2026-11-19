@@ -102,34 +102,27 @@ export async function handle(update) {
     return reply(next, prefix);
   }
 
-  // Last step done. State is not advanced, so on failure the user can just retry the last step.
-  // A double tap on Submit would otherwise send twice; released after submit, or expires in 30s.
+  // Last step done. A double tap on Submit would otherwise send twice; released below, or expires in 30s.
   if (!(await redis('SET', `submit:${chat}`, 1, 'NX', 'EX', 30))) return;
-  const sub = await submit(chat, s, update.message?.from ?? cb.from);
-  if (!sub) {
-    await redis('DEL', `submit:${chat}`);
-    s.ids.push((await send(chat, 'Failed to send to your commanders. Please try again.')).message_id);
-    return save();
+  try {
+    const sub = await submit(chat, s, update.message?.from ?? cb.from);
+    if (sub) return await complete(chat, key, s, sub);
+  } catch (e) {
+    console.error('submit:', e);
   }
-  return complete(chat, key, s, sub);
+  // Not committed: the form stays at review, so Submit again retries (admins may get a duplicate, never nothing).
+  await redis('DEL', `submit:${chat}`);
+  s.ids.push((await send(chat, 'Failed to send to your commanders. Please try again.')).message_id);
+  return save();
 }
 
-/** Sends the soldier a summary, deletes the form messages and records the submission. */
+/**
+ * Records a sent submission, then deletes the form. Every step before that DEL is safe to redo,
+ * so a failure anywhere earlier is retried by the soldier; only cosmetic cleanup comes after it.
+ */
 async function complete(chat, key, s, sub) {
-  await redis('DEL', key, `submit:${chat}`);
-  try {
-    // Telegram can't delete messages older than 48h; those just stay.
-    for (let i = 0; i < s.ids.length; i += 100) {
-      await tg('deleteMessages', { chat_id: chat, message_ids: s.ids.slice(i, i + 100) });
-    }
-  } catch (e) {
-    console.error('cleanup:', e);
-  }
   const sent = await send(chat, `${sub.text}\n\nSubmitted ✅`, { reply_parameters: replyTo(s.grant?.summary) });
   sub.summary = sent.message_id;
-  sub.day = today();
-  sub.at = new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Singapore', hour: '2-digit', minute: '2-digit' });
-  // ponytail: buttons go dead after 7 days, raise EXPIRE if admins act later
   await hput(`sub:${sub.id}`, 'data', sub, WEEK);
   await log(sub, {});
   await put(`profile:${chat}`, { rank: s.rank, name: s.name });
@@ -138,6 +131,15 @@ async function complete(chat, key, s, sub) {
     await redis('HDEL', `grant:${chat}`, s.link);
     const row = await redis('HGET', `day:${s.grant.day}`, s.link);
     if (row) await redis('HSET', `day:${s.grant.day}`, s.link, JSON.stringify({ ...JSON.parse(row), mc: true }));
+  }
+  await redis('DEL', key, `submit:${chat}`); // commit: no retry after this
+  try {
+    // Telegram can't delete messages older than 48h; those just stay.
+    for (let i = 0; i < s.ids.length; i += 100) {
+      await tg('deleteMessages', { chat_id: chat, message_ids: s.ids.slice(i, i + 100) });
+    }
+  } catch (e) {
+    console.error('cleanup:', e);
   }
 }
 
