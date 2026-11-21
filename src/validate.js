@@ -12,7 +12,7 @@ const WORDS = new Set(['condition', 'clinic', 'purpose', 'venue', 'reason']);
  * Validates a typed answer.
  *
  * @param {string} step Form step being answered.
- * @param {string} text Trimmed user input.
+ * @param {string} text Trimmed user input; dates already `expand`ed to DD/MM/YYYY.
  * @param {object} s Form state so far (for start/end cross-checks).
  * @return {string|null} Error message to show the user, or null if valid.
  */
@@ -27,13 +27,13 @@ export function invalid(step, text, s) {
   if (step === 'time' && !parseDateTime(`${today()} ${text}`, true)) return 'Invalid time. Use 24h, e.g. 0830.';
   if (step === 'when') {
     const when = parseDateTime(text, true);
-    if (!when) return 'Invalid date/time. Use DD/MM/YYYY HHMM, e.g. 25/12/2026 0930.';
+    if (!when) return 'Invalid date/time. Use DDMMYY HHMM, e.g. 251226 0930.';
     if (when < today0()) return 'The appointment cannot be in the past.';
     if (when - today0() > YEAR) return 'The appointment is too far ahead.';
   }
   if (step !== 'start' && step !== 'end' && step !== 'onset') return null;
-  const date = parseDateTime(text.replace(/^(\d\d)(\d\d)(\d\d)$/, '$1/$2/20$3'), false); // onset is DDMMYY
-  if (!date) return step === 'onset' ? 'Invalid date. Use DDMMYY, e.g. 151126.' : 'Invalid date. Use DD/MM/YYYY.';
+  const date = parseDateTime(text, false);
+  if (!date) return 'Invalid date. Use DDMMYY, e.g. 151126.';
   if (Math.abs(date - today0()) > YEAR) return 'That date is too far from today.';
   if (step === 'onset' && date > today0()) return 'The date cannot be in the future.';
   if (step === 'end') {
