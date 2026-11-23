@@ -1,142 +1,161 @@
-# Report Sick Bot
+# Report Sick Bot — User Guide
 
-A Telegram bot for a military unit. Soldiers DM it to request permission to report sick or attend a medical appointment, or to send an MC / status. Each submission goes to the administrators listed in the `ADMINS` env var, who approve, reject or acknowledge it with inline buttons.
+A Telegram bot for 40 SAR soldiers. Use it to ask permission to report sick, to ask permission to attend a medical appointment, or to send your MC / status to your commanders.
 
-Stack: Bun (tests) · one Vercel serverless function · Upstash Redis over REST · Telegram Bot API. No build step, no runtime dependencies.
+> Developers: see the [Developer Guide](docs/DeveloperGuide.md).
 
-## Architecture
+---
 
-Telegram POSTs every update to `api/webhook.js`. The function keeps nothing in memory between requests; all state is in Redis.
+## Why this bot exists
 
-| File | Responsibility |
+Without the bot, soldiers ask for permission through calls, texts and group chats. Requests get lost, commanders miss them, and nobody has a clear record of who is sick today.
+
+The bot fixes this:
+
+- **One place to ask.** Every request follows the same short set of questions.
+- **Every admin sees it at once.** You don't need to chase one person.
+- **One clear answer.** The first admin to respond decides, and the bot tells you right away.
+- **Your MC is linked to your request.** Admins can see which approval it belongs to.
+
+## Features
+
+| Feature | What it means for you |
 |---|---|
-| `api/webhook.js` | Entry point. Checks the secret header, calls `handle`, always answers 200. |
-| `src/flow.js` | `handle(update)`: routes an update to admin code or the soldier's form. Start here when tracing a bug. |
-| `src/form.js` | Questions (`QUESTIONS`), step order per workflow (`FLOWS`), button-answered steps (`BUTTON_STEPS`), summary text (`details`). |
-| `src/validate.js` | `invalid(step, text, state)`: returns an error message for a bad answer, else null. |
-| `src/submissions.js` | Sends a submission to admins; applies their button taps (approve, reject, acknowledge, BatSys); manages grants. |
-| `src/admin.js` | Admin decisions, the reject-reason prompt, `/overview`. |
-| `src/consts.js` | Shared helpers (`btn`, `who`, `replyTo`), `WEEK`, admin button actions. |
-| `src/dates.js` | `today()` in Singapore and the date parser. Soldiers type `DDMMYY [HHMM]`; `expand` turns it into `DD/MM/YYYY` for storage and display. |
-| `src/telegram.js` | `tg`, `send`, `edit`, `toAdmin`: thin Bot API wrappers; `admins`/`adminName` parse the `ADMINS` env var. |
-| `src/store.js` | `redis`, `json`, `hash`, `put`, `hput` (pipelined): thin Upstash REST wrappers. |
+| Three request types | Report sick, medical appointment, or send MC / status |
+| Remembers you | After your first request, tap **✅ Yes** to keep your rank and name |
+| Step-by-step questions | One question at a time, with buttons where possible |
+| Checks your answers | Wrong dates or formats are caught before you submit |
+| Review before sending | You check every answer, then submit or start over |
+| Clean chat | After you submit, the questions are cleared and only one summary stays |
+| Instant outcome | You get a message when your request is approved, rejected or acknowledged |
+| One-tap MC | After approval, tap **📄 Send MC / Status** to send your MC for that request |
 
-### Workflows
+## Getting started
 
-Each workflow is a list of steps in `FLOWS` (`src/form.js`):
+1. Open Telegram and search for the bot. Your unit will give you its name.
+2. Tap **Start**.
+3. Answer the questions.
 
-- `sick`: condition, onset, body, clinic, time, ack, review
-- `appt`: purpose, when, venue, shot, pledge, review
-- `mc`: formsg, link, reason, start, end, file, review
+The bot only works in a private chat. It ignores messages in group chats.
 
-Before the first step the bot asks for rank and name (or "Continue as PTE Tan?" if `profile:<chat>` exists). The `review` step shows all answers with **Submit** / **Start over**. `/start` restarts the form at any step, `/cancel` aborts it.
+---
 
-### Lifecycle of a submission
+## How to use it
 
-1. Soldier submits. A `sub:<id>` record is stored and a `[For Admin]` message with buttons goes to every admin.
-2. An admin taps a button. The first decision wins (atomic claim in Redis). Every admin's copy and the soldier's summary are edited, and the soldier gets a reply message.
-   - sick / appt: **Approve** or **Reject** (reject asks for an optional reason), then **Added to BatSys?**
-   - mc: **Acknowledge**, then **Added to BatSys?** (admins only; the soldier is not told)
-3. An approval creates a *grant* in `grant:<chat>`. The soldier can attach one MC to it via the **Send MC / Status** button or the link step in `/start`. A sick grant lasts 7 days; an appointment grant lasts until 7 days after the appointment. An MC can also be sent with no request.
-4. Admins can send `/overview` for today's (Singapore time) counts, pending items and statuses. It shows names only, no medical details.
+### 1. Tell the bot who you are
 
-### Redis keys
+- **First time:** tap your **Rank**, then type your **Name**.
+- **After that:** the bot asks *"Continue as PTE Tan?"* Tap **✅ Yes**, or tap **Change** to enter a new rank and name.
 
-| Key | Holds | TTL |
+### 2. Choose what you need
+
+The bot asks *"How may I help you?"* Tap one option:
+
+- **Request Permission to Report Sick**
+- **Request Permission to attend upcoming Medical Appointment**
+- **Send MC / Status from the Doctor / MO**
+
+### 3a. Report sick
+
+| Step | What to give |
+|---|---|
+| Symptoms | What you feel, how bad it is, any fever. Example: `Fever 38.5, sore throat, cough` |
+| Since when | The date your symptoms started, as `DDMMYY` |
+| Side of body | Tap **Left**, **Right**, **Both** or **NA** |
+| Clinic | The clinic you will visit |
+| Visit time | 24-hour time, as `HHMM`. Example: `0830` |
+| Pledge | Tap **✅ I acknowledge**. You agree to wait for approval before you report sick. |
+
+### 3b. Medical appointment
+
+| Step | What to give |
+|---|---|
+| Reason | Example: `Eczema review` |
+| Date and time | As `DDMMYY HHMM`. Example: `251226 0930` |
+| Clinic | The clinic of your appointment |
+| Screenshot | One image of your appointment |
+| Pledge | Tap **✅ I acknowledge**. You agree to get approval before you go. |
+
+### 3c. Send MC / status
+
+| Step | What to give |
+|---|---|
+| FormSG Response ID | Complete the [40 SAR Report Sick Form](https://go.gov.sg/medicalforms-40sar). Then paste the Response ID it gives you (24 characters, for example `6ad8500b1d0ae72f026cfa75`). |
+| Which request | Asked only if you have an approved request waiting for an MC. Tap it, or tap **📄 Not for any request above**. |
+| Reason / status | The status or MC reason the doctor gave |
+| Start date | Tap **Today**, or type `DDMMYY` |
+| End date | As `DDMMYY` |
+| Document | One photo or PDF of your MC / memo |
+
+### 4. Review and submit
+
+The bot shows all your answers.
+
+- Tap **✅ Submit** to send them.
+- Tap **🔄 Start over** to begin again.
+
+After you submit, the bot clears the questions and keeps one **Submitted ✅** summary.
+
+### 5. Get your answer
+
+| You receive | Meaning | What to do next |
 |---|---|---|
-| `form:<chat>` | Form in progress | 1 hour |
-| `profile:<chat>` | Remembered rank and name | none |
-| `sub:<id>` | A submission and its claimed outcomes | 7 days |
-| `day:<DD/MM/YYYY>` | Hash of the day's submissions, for `/overview` | n/a |
-| `grant:<chat>` | Approved requests awaiting an MC | 1 year (`grant()` in `src/submissions.js`); each grant's `until` does the real expiry |
-| `submit:<chat>` | Double-tap lock on Submit | 30 s |
-| `rej:<chat>` | Admin's pending reject prompt | n/a |
+| ✅ Approved by *name* | You may go | After your visit, tap **📄 Send MC / Status** |
+| ❌ Rejected by *name* | You may not go. A reason may be shown. | Send `/start` to make a new request |
+| 👍 Acknowledged by *name* | Your MC / status was received | Nothing |
 
-## Local development
+When a report-sick request is approved, the bot also reminds you to complete the FormSG form after you see the doctor.
 
-```sh
-bun test
-```
+---
 
-Nothing to install. Tests use dummy data and never touch real Telegram or Upstash:
+## How to type dates and times
 
-- `tests/unit.test.js`: date parsing, answer validation.
-- `tests/integration.test.js`: calls the webhook handler directly with `fetch` mocked to the in-memory fake in `tests/fake.js`. Add new behaviour tests here.
+| Type | Format | Example | Means |
+|---|---|---|---|
+| Date | `DDMMYY` | `251226` | 25/12/2026 |
+| Date and time | `DDMMYY HHMM` | `251226 0930` | 25/12/2026, 9:30 am |
+| Time | `HHMM` (24-hour) | `1415` | 2:15 pm |
 
-CI (`.github/workflows/test.yml`) runs `bun test` on every push and pull request.
+The bot checks these rules:
 
-Use `bun`, not `npm` / `npx`.
+- Symptoms cannot start in the future.
+- Dates must be within one year of today.
+- An appointment cannot be in the past.
+- An MC's end date cannot be before its start date.
 
-## Deployment
+If an answer is wrong, the bot explains why and asks again.
 
-1. Run `vercel` in this folder.
-2. Vercel dashboard → Storage → add **Upstash for Redis** and connect it. This sets `KV_REST_API_URL` and `KV_REST_API_TOKEN`.
-3. Set these env vars, then run `vercel --prod`:
+## Commands
 
-   | Var | Value |
-   |---|---|
-   | `BOT_TOKEN` | From @BotFather |
-   | `WEBHOOK_SECRET` | Random string, letters, digits, `_`, `-` only |
-   | `ADMINS` | JSON `{"Name":telegramId}`, see below |
-
-4. Point Telegram at the function:
-
-   ```sh
-   curl "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=https://<app>.vercel.app/api/webhook&secret_token=<WEBHOOK_SECRET>"
-   ```
-
-5. Optional, once: show the command menu.
-
-   ```sh
-   curl "https://api.telegram.org/bot<BOT_TOKEN>/setMyCommands" -H "content-type: application/json" \
-     -d '{"commands":[{"command":"start","description":"New request or MC"},{"command":"cancel","description":"Cancel the current form"},{"command":"overview","description":"Admins: today'"'"'s overview"}]}'
-   ```
-
-Env vars only take effect after a redeploy.
-
-### Managing admins
-
-`ADMINS` maps display names to Telegram user IDs, e.g. `{"Joen":123456789}`. Names are only labels. IDs are personal data, so keep the list out of git: store it in an untracked `config.json` (`{ "admins": { ... } }`, already in `.gitignore`) and push it to Vercel:
-
-```sh
-vercel env rm ADMINS production   # only if it already exists
-bun -e "console.log(JSON.stringify(require('./config.json').admins))" | vercel env add ADMINS production
-vercel --prod
-```
-
-- Find a user's ID by having them message @userinfobot.
-- Each admin must press **Start** on the bot once; Telegram forbids bots messaging users who never started them.
-- If one admin is unreachable, the others still receive the submission and the Vercel logs show `admin <name> <id>: ...`.
-
-## Common changes
-
-- **Reword a question:** edit `QUESTIONS` in `src/form.js`.
-- **Add or reorder a step:** add it to `QUESTIONS` and the right list in `FLOWS`; add to `BUTTON_STEPS` if answered by a button; add a rule in `invalid` (`src/validate.js`) if the answer needs checking; add to `details` if admins should see it. Update the tests.
-- **Add a rank:** edit `RANKS` in `src/form.js`. The keyboard in `QUESTIONS.rank` is three per row; check the layout.
-- **Change an expiry:** `WEEK` in `src/consts.js`, the grant key's 1-year TTL in `grant()`; the form's `3600` in `src/flow.js`. Admin buttons stop working after `WEEK`.
-
-## Conventions and gotchas
-
-- **Always answer 200 from the webhook.** Any other status makes Telegram retry the same update forever. Catch and log.
-- **No new infrastructure.** Redis hashes and `SET ... NX` locks cover the double-tap guard and "first decision wins". Don't add a database or queue.
-- **Submit is at-least-once.** `sub:<id>` is saved before admins see its buttons; the form is deleted last, so any earlier failure is retried by the soldier. Admins may get a duplicate, never nothing. Keep new submit steps before that `DEL` safe to redo.
-- **Admin taps: claim first, answer after.** `claim()` is one atomic Lua `EVAL` (exists check, `HSETNX`, read-back). The tap is answered with a popup only once Redis has it; every follow-up (copies, soldier, `/overview`, grant) then runs in one parallel batch via `settle`. Keep new follow-ups in that batch, not after it.
-- **Admin messages start with `[For Admin]`.** Send them with `toAdmin`, not `send`.
-- **No personal data in git.** Never commit tokens, `.env*`, `config.json`, real names or Telegram IDs. Tests use dummy data only.
-- **Telegram limits.** Messages cap at 4096 characters (answers are capped at 500 to stay under it). Bots can't edit or delete messages older than 48 hours.
-- **Edited messages are ignored.** To change an answer the soldier taps Start over.
-- `ponytail:` comments mark deliberate shortcuts. Read them before "fixing" the code.
-- Commits: imperative subject, at most 50 chars (`Add LTA rank`). Template: `git config commit.template .gitmessage`. Don't merge on red CI.
-- The codebase is deliberately small. Match the existing style, document functions with a short JSDoc, and avoid abstractions for single-use code.
-
-## Troubleshooting
-
-| Symptom | Check |
+| Command | What it does |
 |---|---|
-| Anything wrong | `GET https://<app>.vercel.app/api/health` → `{ok, redis, webhook, admins}`; 503 names the failing part, Vercel logs `health <part>: ...` give the reason. Point an uptime monitor (e.g. UptimeRobot, 5 min) at it. |
-| Bot silent | `https://api.telegram.org/bot<BOT_TOKEN>/getWebhookInfo` → `last_error_message`; then Vercel function logs. A 401 means `WEBHOOK_SECRET` differs from the one given to `setWebhook`. |
-| Admin gets nothing | Vercel logs `admin <name> <id>: ...`. Usually they never pressed Start, or the ID is wrong. |
-| `redis: ...` errors | `KV_REST_API_URL` / `KV_REST_API_TOKEN` in the Vercel project. |
-| Soldier stuck in a form | They send `/start` (restart) or `/cancel`. Forms expire after 1 hour anyway. |
-| Works in tests, not live | Redeploy; env vars only apply to new deployments. |
-| "This request already has an MC / Status, or it has expired" | One MC per request, and grants expire; see Lifecycle step 3. |
+| `/start` | Start a new request, or restart the current one |
+| `/cancel` | Stop the current request |
+
+## FAQ
+
+**I made a mistake.**
+Before you submit, tap **🔄 Start over** or send `/start`. Editing a message you already sent does not change your answer. After you submit, send a new request.
+
+**The bot is not replying.**
+Send `/start`. An unfinished request expires after 1 hour.
+
+**The "Send MC / Status" button stopped working.**
+Each approval accepts one MC. The button expires 7 days after a report-sick approval, or 7 days after your appointment. Send `/start` and choose **Send MC / Status from the Doctor / MO** instead.
+
+**My FormSG Response ID is not accepted.**
+Copy the full 24-character ID from the FormSG confirmation page. If it is rejected a second time, the bot skips that question so you can continue.
+
+**Can I use the bot in a group chat?**
+No. Use a private chat with the bot.
+
+## Privacy
+
+- Your request details are kept for 7 days. After that, they are deleted.
+- Your rank and name are saved so you don't need to type them every time.
+- Only your unit's admins see your requests.
+
+## Support
+
+For problems with a request, contact your unit admin or commander.
+Maintained by the **40SAR Data Team**.

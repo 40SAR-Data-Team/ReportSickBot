@@ -1,3 +1,7 @@
+/** Timezone of every date and time the bot shows, stores or checks. */
+export const TZ = 'Asia/Singapore';
+/** The unit's FormSG report-sick form: its link and the name soldiers see. */
+export const FORMSG = { url: 'https://go.gov.sg/medicalforms-40sar', name: '40 SAR Report Sick Form' };
 /** Lifetime of a submission and its grant window. */
 export const WEEK = 604800; // seconds
 /** Button actions on a submission's admin copy; each is checked against the buttons still offered. */

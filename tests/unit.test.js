@@ -1,7 +1,7 @@
 import { expect, setSystemTime, test } from 'bun:test';
 import { expand, parseDateTime, today } from '../src/dates.js';
 import { invalid } from '../src/validate.js';
-import { TOMORROW } from './fake.js';
+import { MC_FROM, MC_TO, TOMORROW, day, typed } from './fake.js';
 
 test.each([
   ['1/2/2026', false, Date.UTC(2026, 1, 1)], // single-digit day and month
@@ -56,13 +56,13 @@ test.each([
   ['when', '010199 1400', {}, 'too far ahead'],
   ['start', '010199', {}, 'too far from today'],
   ['end', TOMORROW, { start: '01/01/2000' }, 'longer than a year'],
-  ['start', '101026', {}, null],
-  ['start', '101026 0830', {}, 'Use DDMMYY'],
-  ['start', '131026', { end: '12/10/2026' }, 'after the end'],
-  ['start', '121026', { end: '12/10/2026' }, null],
-  ['end', '091026', { start: '10/10/2026' }, 'before the start'],
-  ['end', '101026', { start: '10/10/2026' }, null],
-  ['end', '310226', { start: '10/10/2026' }, 'Invalid date'],
+  ['start', typed(MC_FROM), {}, null],
+  ['start', `${typed(MC_FROM)} 0830`, {}, 'Use DDMMYY'],
+  ['start', typed(day(0)), { end: MC_TO }, 'after the end'],
+  ['start', typed(MC_TO), { end: MC_TO }, null],
+  ['end', typed(day(-4)), { start: MC_FROM }, 'before the start'],
+  ['end', typed(MC_FROM), { start: MC_FROM }, null],
+  ['end', '310226', { start: MC_FROM }, 'Invalid date'],
 ])('invalid(%p, %p)', (step, text, s, err) => {
   text = expand(text); // as flow.js does for date steps; no other row starts with 6 digits
   if (err) expect(invalid(step, text, s)).toContain(err);
@@ -95,6 +95,6 @@ test('fuzz: random input never throws', () => {
   for (let i = 0; i < 2000; i++) {
     const t = Array.from({ length: Math.random() * 20 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
     parseDateTime(t, i % 2 === 0);
-    for (const step of steps) invalid(step, t, { start: '10/10/2026', end: '12/10/2026' });
+    for (const step of steps) invalid(step, t, { start: MC_FROM, end: MC_TO });
   }
 });

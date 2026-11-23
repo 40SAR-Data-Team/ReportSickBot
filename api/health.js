@@ -12,11 +12,15 @@ const check = async (name, fn) => {
   return false;
 };
 
-/**
- * GET /api/health: 200 if Redis answers, the Telegram webhook is set with no error in the last 10 minutes,
- * and ADMINS is configured; else 503. Booleans only, no IDs or error text, so it is safe to leave public.
- */
-export default async function health(req, res) {
+// Public and unauthenticated, yet every fresh check spends a Redis command and a Telegram getWebhookInfo call.
+// Telegram rate-limits per bot token, so a flood here could also throttle the bot's real replies. Reuse one
+// result for 30s per warm instance; concurrent requests share the in-flight check.
+// ponytail: per-instance cache, so each cold start still runs one check; add a Vercel Firewall rate-limit rule on /api/health if floods matter.
+const TTL_MS = 30_000;
+let cached = { at: -Infinity, result: null };
+export const resetHealthCache = () => { cached = { at: -Infinity, result: null }; }; // tests only
+
+const runChecks = async () => {
   const [redisOk, webhook, adminsOk] = await Promise.all([
     check('redis', async () => (await redis('PING')) === 'PONG'),
     check('webhook', async () => {
@@ -25,6 +29,15 @@ export default async function health(req, res) {
     }),
     check('admins', () => admins().length > 0),
   ]);
-  const ok = redisOk && webhook && adminsOk;
-  res.status(ok ? 200 : 503).json({ ok, redis: redisOk, webhook, admins: adminsOk });
+  return { ok: redisOk && webhook && adminsOk, redis: redisOk, webhook, admins: adminsOk };
+};
+
+/**
+ * GET /api/health: 200 if Redis answers, the Telegram webhook is set with no error in the last 10 minutes,
+ * and ADMINS is configured; else 503. Booleans only, no IDs or error text, so it is safe to leave public.
+ */
+export default async function health(req, res) {
+  if (!(Date.now() - cached.at < TTL_MS)) cached = { at: Date.now(), result: runChecks() };
+  const result = await cached.result; // never rejects: check() turns every throw into false
+  res.status(result.ok ? 200 : 503).json(result);
 }

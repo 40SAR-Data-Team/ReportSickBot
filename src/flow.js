@@ -24,7 +24,8 @@ export async function handle(update) {
   // admin taps are answered by decide, after their claim is stored; soldier taps right away
   if (ADMIN_ACTIONS.includes(cb?.data?.split(':')[0])) return decide(cb, admin);
   if (cb) await tg('answerCallbackQuery', { callback_query_id: cb.id });
-  if (admin && text === '/overview') return overview(chat);
+  // /overview is in everyone's command menu; only admins get it
+  if (text === '/overview') return admin ? overview(chat) : send(chat, 'Only admins can use /overview. Send /start to make a request.');
   if (admin && text && !text.startsWith('/') && await finishReject(chat, admin, text)) return;
 
   if (text === '/start' || text === '/cancel') {

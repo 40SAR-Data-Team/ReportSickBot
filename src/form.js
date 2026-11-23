@@ -1,4 +1,4 @@
-import { HTML, btn, who } from './consts.js';
+import { FORMSG, HTML, btn, who } from './consts.js';
 import { today } from './dates.js';
 import { json } from './store.js';
 import { send } from './telegram.js';
@@ -18,7 +18,7 @@ const PLEDGE = "I will seek my commander's approval before heading for my Medica
 /** Link-step button for an MC that belongs to no request. */
 export const UNLINKED = '📄 Not for any request above';
 /** HTML link to the FormSG report-sick form. */
-export const FORM = '(<a href="https://go.gov.sg/medicalforms-40sar">40 SAR Report Sick Form</a>)';
+export const FORM = `(<a href="${FORMSG.url}">${FORMSG.name}</a>)`;
 export const EG = '6ad8500b1d0ae72f026cfa75'; // example FormSG Response ID
 
 /** Step -> [question text, inline keyboard?, send options?], or a function of the form state returning that. */

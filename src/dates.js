@@ -1,5 +1,7 @@
-/** Today's date in Singapore as DD/MM/YYYY. */
-export const today = () => new Date().toLocaleDateString('en-GB', { timeZone: 'Asia/Singapore' });
+import { TZ } from './consts.js';
+
+/** Today's date in TZ as DD/MM/YYYY. */
+export const today = () => new Date().toLocaleDateString('en-GB', { timeZone: TZ });
 /** Typed "DDMMYY[ HHMM]" as "DD/MM/YYYY[ HHMM]", the stored and shown form. Anything else passes through. */
 export const expand = (text) => text.replace(/^(\d\d)(\d\d)(\d\d)(?= |$)/, '$1/$2/20$3');
 /**

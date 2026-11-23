@@ -1,4 +1,10 @@
 // Dummy Telegram + Upstash backend and update builders shared by the tests.
+import { parseDateTime, today } from '../src/dates.js';
+
+/** The date `n` days from today() as shown (DD/MM/YYYY), so fixtures never age past the validator's one-year window. */
+export const day = (n) => new Date(parseDateTime(today(), false).getTime() + n * 864e5).toLocaleDateString('en-GB', { timeZone: 'UTC' });
+/** A shown date (DD/MM/YYYY) as typed (DDMMYY). */
+export const typed = (d) => d.replace(/\/\d\d(\d\d)$/, '$1').replace(/\//g, '');
 
 export const ADMINS = [901, 902];
 export const USER = { id: 111, username: 'pte_tan' };
@@ -83,16 +89,19 @@ export const adminText = (admin, t) => ({
 export const groupText =(t) => ({ update_id: ++id, message: { message_id: ++id, chat: { id: -1, type: 'group' }, from: USER, text: t } });
 
 /** Yesterday in Singapore as DDMMYY, a valid symptom start date whenever the suite runs. */
-export const YESTERDAY = new Date(Date.now() - 864e5).toLocaleDateString('en-GB', { timeZone: 'Asia/Singapore' }).replace(/\/\d\d(\d\d)$/, '$1').replace(/\//g, '');
+export const YESTERDAY = typed(day(-1));
 /** Tomorrow as DDMMYY, a future symptom start date. */
-export const TOMORROW = new Date(Date.now() + 864e5).toLocaleDateString('en-GB', { timeZone: 'Asia/Singapore' }).replace(/\/\d\d(\d\d)$/, '$1').replace(/\//g, '');
+export const TOMORROW = typed(day(1));
+/** MC start and end as shown (DD/MM/YYYY): a past 3-day MC. */
+export const MC_FROM = day(-3);
+export const MC_TO = day(-1);
 export const SICK_FLOW = [text('/start'), tap('rank:PTE'), text('Tan Ah Kow'), tap('type:sick'),
   text('Fever and sore throat'), text(YESTERDAY), tap('body:Left'), text('Kranji Medical Centre'), text('0830'), tap('ack:yes'), tap('review:yes')];
 /** MC after an earlier request: its saved profile is reused. With an open grant, a link tap goes after the first 3. Add the file, then `SUBMIT`. */
 export const MC_FLOW = [text('/start'), tap('profile:yes'), tap('type:mc'), text('6ad8500b1d0ae72f026cfa75'),
-  text('Sprained ankle, light duty'), text('101026'), text('121026')];
+  text('Sprained ankle, light duty'), text(typed(MC_FROM)), text(typed(MC_TO))];
 /** Tomorrow in Singapore as shown (DD/MM/YYYY), a valid appointment date whenever the suite runs. */
-export const APPT_DAY = new Date(Date.now() + 864e5).toLocaleDateString('en-GB', { timeZone: 'Asia/Singapore' });
+export const APPT_DAY = day(1);
 export const SUBMIT = tap('review:yes');
 export const APPT_FLOW = [text('/start'), tap('rank:PTE'), text('Tan Ah Kow'), tap('type:appt'),
   text('Eczema'), text(`${TOMORROW} 1400`), text('SGH Dermatology'), photo(), tap('pledge:yes'), tap('review:yes')];

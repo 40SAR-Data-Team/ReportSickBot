@@ -2,8 +2,8 @@
 import { afterAll, beforeEach, expect, setSystemTime, test } from 'bun:test';
 import handler from '../api/webhook.js';
 import { expand, today as day } from '../src/dates.js';
-import health from '../api/health.js';
-import { ADMINS, APPT_DAY, TOMORROW, YESTERDAY, APPT_FLOW, ENV, MC_FLOW, SICK_FLOW, USER, adminTap, SUBMIT, adminText, doc, fakeBackend, groupText, photo, tap, text } from './fake.js';
+import health, { resetHealthCache } from '../api/health.js';
+import { ADMINS, APPT_DAY, MC_FROM, MC_TO, day as dayIn, TOMORROW, YESTERDAY, APPT_FLOW, ENV, MC_FLOW, SICK_FLOW, USER, adminTap, SUBMIT, adminText, doc, fakeBackend, groupText, photo, tap, text } from './fake.js';
 
 const realFetch = globalThis.fetch;
 let b;
@@ -279,7 +279,7 @@ test('"Send MC / Status" under the approval starts a linked MC with only 5 quest
 });
 
 test('appointment grant stays open until a week after the appointment', async () => {
-  const [d, m, y] = new Date(Date.now() + 100 * 864e5).toLocaleDateString('en-GB', { timeZone: 'Asia/Singapore' }).split('/').map(Number);
+  const [d, m, y] = dayIn(100).split('/').map(Number);
   await sendAll([...APPT_FLOW.slice(0, 5), text(`${d}/${m}/${y} 1400`), ...APPT_FLOW.slice(6)]);
   await send(adminTap(ADMINS[0], keys(ADMINS[0])[0].callback_data));
   const [g] = b.store.get('grant:111').values();
@@ -336,7 +336,7 @@ test('/overview shows counts, who is waiting, and each status, for admins only',
     '📄 MC / Status: 1 (1 ⏳)',
     '',
     '⏳ Waiting',
-    'PTE Tan Ah Kow, MC 10/10/2026 to 12/10/2026',
+    `PTE Tan Ah Kow, MC ${MC_FROM} to ${MC_TO}`,
     `PTE Tan Ah Kow, medical appointment ${APPT_DAY} 1400`,
     '',
     '📄 Awaiting MC',
@@ -351,12 +351,13 @@ test('/overview shows counts, who is waiting, and each status, for admins only',
     `PTE Tan Ah Kow, medical appointment ${APPT_DAY} 1400 – ⏳ waiting`,
     '',
     '📄 MC / Status',
-    'PTE Tan Ah Kow, MC 10/10/2026 to 12/10/2026 – ⏳ not yet acknowledged',
+    `PTE Tan Ah Kow, MC ${MC_FROM} to ${MC_TO} – ⏳ not yet acknowledged`,
   ].join('\n'));
   expect(out).not.toContain('Fever'); // no medical details
   expect(out).not.toContain('secret');
-  await send(text('/overview')); // non-admin: starts a form instead
-  expect(b.toUser().at(-1)).toBe('Continue as PTE Tan Ah Kow?');
+  await send(text('/overview')); // non-admin: told it is admin-only, no form started
+  expect(b.toUser().at(-1)).toBe('Only admins can use /overview. Send /start to make a request.');
+  expect(b.store.has('form:111')).toBe(false);
 });
 
 test('rank question offers all ranks with the new wording', async () => {
@@ -379,7 +380,7 @@ test.each([['PDF', () => doc('application/pdf'), '[For Admin]'], ['captioned ima
       const [post, copy] = b.toAdmin(admin).slice(-2);
       expect(post.text).toContain('MC / STATUS');
       expect(post.text).toContain('Reason / Status: Sprained ankle, light duty');
-      expect(post.text).toContain('From 10/10/2026 to 12/10/2026');
+      expect(post.text).toContain(`From ${MC_FROM} to ${MC_TO}`);
       expect(copy).toMatchObject({ method: 'copyMessage', from_chat_id: 111, message_id: f.message.message_id, caption });
       expect(copy.reply_parameters.message_id).toBe(post.result.message_id);
     }
@@ -389,6 +390,7 @@ test.each([['PDF', () => doc('application/pdf'), '[For Admin]'], ['captioned ima
 test('rejects a wrong or missing secret, and everything when WEBHOOK_SECRET is unset', async () => {
   expect(await send(text('/start'), 'wrong')).toBe(401);
   expect(await send(text('/start'), '')).toBe(401);
+  expect(await send(text('/start'), ENV.WEBHOOK_SECRET + 'x')).toBe(401); // right prefix, different length
   expect(b.calls).toHaveLength(0);
   delete process.env.WEBHOOK_SECRET;
   expect(await send(text('/start'), '')).toBe(401);
@@ -641,7 +643,8 @@ test('an approval takes 4 sequential round trips (was 10)', async () => {
   expect(lastToUser().text).toStartWith('✅ Approved by Admin B');
 });
 
-async function checkHealth() {
+async function checkHealth({ fresh = true } = {}) {
+  if (fresh) resetHealthCache();
   let status, body;
   await health({}, { status(c) { status = c; return this; }, json(j) { body = j; } });
   return { status, body };
@@ -661,6 +664,12 @@ test.each([
   const { status, body } = await checkHealth();
   expect(status).toBe(503);
   expect(body).toMatchObject({ ok: false, [part]: false });
+});
+
+test('health: repeat and concurrent hits within 30s reuse one check', async () => {
+  await checkHealth();
+  await Promise.all([checkHealth({ fresh: false }), checkHealth({ fresh: false })]);
+  expect(b.calls.filter((c) => c.method === 'getWebhookInfo')).toHaveLength(1);
 });
 
 // --- concurrency ---
