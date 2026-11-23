@@ -1,4 +1,4 @@
-import { WEEK, btn, replyTo, who } from './consts.js';
+import { TZ, WEEK, btn, replyTo, who } from './consts.js';
 import { parseDateTime, today } from './dates.js';
 import { details } from './form.js';
 import { hash, hput, pairs, redis } from './store.js';
@@ -52,7 +52,7 @@ export async function submit(chat, s, from) {
   const kind = { sick: 'sick request', appt: `medical appointment ${s.when}`, mc: `MC ${s.start} to ${s.end}` }[s.type];
   const sub = {
     id: crypto.randomUUID(), user: chat, type: s.type, text: lines.join('\n'), label: `${who(s)}, ${kind}`, kind, rank: s.rank, name: s.name, when: s.when,
-    day: today(), at: new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Singapore', hour: '2-digit', minute: '2-digit' }), msgs: [],
+    day: today(), at: new Date().toLocaleTimeString('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit' }), msgs: [],
   };
   // saved before any admin sees a button, so no button ever points at a missing submission
   // ponytail: buttons go dead after 7 days, raise WEEK if admins act later
